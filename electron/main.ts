@@ -158,8 +158,9 @@ function createWindow() {
         backgroundColor: '#00000000', // Fully transparent background
     })
 
-    // Privacy: Hide from screen sharing/screenshots
+    // Privacy: Hide from screen sharing/screenshots and Mission Control
     win.setContentProtection(true)
+    win.setHiddenInMissionControl(true)
 
     // Visibility: Always on top of EVERYTHING (including full-screen apps)
     win.setAlwaysOnTop(true, 'screen-saver')
@@ -197,6 +198,11 @@ app.on('activate', () => {
 
 app.whenReady().then(() => {
     createWindow()
+
+    // Stealth Mode: Hide from Dock and App Switcher
+    if (process.platform === 'darwin') {
+        app.dock?.hide()
+    }
 
     // Toggle Ghost Mode (Click-through)
     globalShortcut.register('CommandOrControl+Shift+I', () => {
