@@ -109,7 +109,7 @@ ipcMain.handle('ask-groq', async (_, messages: any[]) => {
     const lastMsg = messages[messages.length - 1];
     const hasImage = Array.isArray(lastMsg?.content);
 
-    const model = hasImage ? "llama-3.2-11b-vision-preview" : "llama-3.3-70b-versatile";
+    const model = hasImage ? "meta-llama/llama-4-scout-17b-16e-instruct" : "llama-3.3-70b-versatile";
 
     // Prepend system prompt if not already present
     // We construct the full message chain here to ensure system prompt is always first
@@ -135,10 +135,10 @@ const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
 
 function createWindow() {
     const { workArea } = screen.getPrimaryDisplay()
-    const width = 300
-    const height = 60
+    const width = 260
+    const height = 50
     const x = Math.round(workArea.x + (workArea.width - width) / 2)
-    const y = workArea.y + 40 // Padding from top
+    const y = workArea.y + 20 // Padding from top
 
     win = new BrowserWindow({
         width,
@@ -170,7 +170,7 @@ function createWindow() {
         if (win) {
             const { workArea } = screen.getPrimaryDisplay()
             const x = Math.round(workArea.x + (workArea.width - width) / 2)
-            const y = workArea.y + 40 // Keep same top padding
+            const y = workArea.y + 20 // Keep same top padding
 
             win.setBounds({ x, y, width, height }, true) // true = animate
         }

@@ -43,7 +43,7 @@ function App() {
         inputRef.current?.focus()
       }, 100)
     } else {
-      await (window as any).ipcRenderer.invoke('resize-window', { width: 300, height: 60 })
+      await (window as any).ipcRenderer.invoke('resize-window', { width: 260, height: 50 })
     }
   }
 

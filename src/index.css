@@ -38,7 +38,8 @@ body {
   flex-direction: column;
   justify-content: flex-end;
   /* Bottom aligned */
-  padding: 20px;
+  padding: 0px;
+  /* Remove padding to maximize space */
   pointer-events: none;
   /* Allow click-through on empty space */
 }
@@ -65,8 +66,10 @@ body {
   /* Much darker, almost black */
   backdrop-filter: blur(24px) saturate(180%);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 30px;
-  padding: 8px 16px;
+  border-radius: 9999px;
+  /* Fully rounded for 50px height */
+  padding: 0 12px;
+  /* Horizontal padding only */
   width: 100%;
   height: 100%;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
