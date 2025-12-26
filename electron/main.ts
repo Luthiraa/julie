@@ -70,12 +70,18 @@ ipcMain.handle('capture-screen', async () => {
         const primarySource = sources[0]; // Usually the first one is the main screen
         const image = primarySource.thumbnail.toDataURL();
 
-        win.show(); // Restore window
-        return image;
-    } catch (error) {
-        console.error("Screen Capture Error:", error);
-        win.show(); // Ensure window comes back even on error
-        return null;
+    win.show(); // Restore window
+    return image;
+  } catch (error) {
+    console.error("Screen Capture Error:", error);
+    win.show(); // Ensure window comes back even on error
+    return null;
+  }
+});
+
+ipcMain.handle('close-window', () => {
+    if (win) {
+        win.close();
     }
 });
 

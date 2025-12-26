@@ -4,86 +4,105 @@ import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 import {
-  Sparkles,
-  Wand2,
-  MessageSquare,
-  RefreshCw,
-  ArrowUp,
+  GripVertical,
+  Orbit,
+  CircleDot,
   X,
+  Eye,
+  ChevronDown,
+  MessageSquare,
+  Sparkles,
+  ListChecks,
+  HelpCircle,
+  RefreshCw,
+  ArrowUpRight,
   Camera
 } from 'lucide-react'
 import './index.css'
 import './App.css'
 import { AudioRecorder } from './components/AudioRecorder'
 
+const scenarioOptions = ['Hardware Grants', 'Sales', 'Board Meetings']
+const quickActions = [
+  { label: 'What should I say next?', icon: MessageSquare },
+  { label: 'Follow-up questions', icon: Sparkles },
+  { label: 'Who am I talking to?', icon: HelpCircle },
+  { label: 'Fact-check', icon: ListChecks },
+  { label: 'Recap', icon: RefreshCw }
+]
+const suggestionChips = [
+  'What do you look for in grantees?',
+  'Define data processing pipeline',
+  'Define signal quality'
+]
+const defaultTalkingPoints = [
+  'What signal acquisition method are you using (EEG, ECoG, invasive, non-invasive)?',
+  "What’s the planned data processing pipeline (on-device, cloud, hybrid)?"
+]
+
+type Role = 'user' | 'assistant'
+type VisionBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+type MessageContent = string | VisionBlock[]
+type ChatMessage = { role: Role; content: MessageContent }
+
 function App() {
-  const [isExpanded, setIsExpanded] = useState(false)
   const [input, setInput] = useState('')
-  const [messages, setMessages] = useState<{ role: 'user' | 'assistant', content: string | any[] }[]>([])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isLoading, setIsLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState('Chat')
+  const [scenario, setScenario] = useState(scenarioOptions[0])
   const [transcriptHistory, setTranscriptHistory] = useState('')
+  const [showTranscript, setShowTranscript] = useState(false)
   const [isScreenshotMode, setIsScreenshotMode] = useState(false)
+  const [isListening, setIsListening] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  // Scroll to bottom of chat
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const toggleExpand = async () => {
-    const newExpandedState = !isExpanded
-    setIsExpanded(newExpandedState)
-
-    if (newExpandedState) {
-      await (window as any).ipcRenderer.invoke('resize-window', { width: 700, height: 500 })
-      // Force focus slightly after render to ensure window is ready
-      setTimeout(() => {
-        inputRef.current?.focus()
-      }, 100)
-    } else {
-      await (window as any).ipcRenderer.invoke('resize-window', { width: 260, height: 50 })
+  useEffect(() => {
+    const resize = async () => {
+      try {
+        await window.ipcRenderer.invoke('resize-window', { width: 960, height: 820 })
+      } catch (error) {
+        console.debug('resize skipped', error)
+      }
     }
-  }
+    resize()
+    setTimeout(() => inputRef.current?.focus(), 200)
+  }, [])
 
   const handleTranscript = async (text: string) => {
-    console.log("Transcript chunk:", text)
-    setTranscriptHistory(prev => prev + " " + text)
+    setTranscriptHistory(prev => `${prev} ${text}`.trim())
   }
 
   const toggleScreenshotMode = () => {
-    const newMode = !isScreenshotMode
-    setIsScreenshotMode(newMode)
-    console.log('Screenshot Mode:', newMode ? 'ON' : 'OFF')
+    setIsScreenshotMode(prev => !prev)
   }
 
-  const handleSubmit = async (e?: React.FormEvent) => {
+  const handleSubmit = async (e?: React.FormEvent, overrideText?: string) => {
     if (e) e.preventDefault()
+    const typedInput = overrideText ?? input
+    if (!typedInput.trim() && !transcriptHistory.trim() && !isScreenshotMode) return
 
-
-    if (!input.trim() && !transcriptHistory.trim() && !isScreenshotMode) return
-
-    // Silent Capture if Mode is ON
-    let currentScreenshot = null
+    let currentScreenshot: string | null = null
     if (isScreenshotMode) {
-      currentScreenshot = await (window as any).ipcRenderer.invoke('capture-screen')
+      currentScreenshot = await window.ipcRenderer.invoke('capture-screen') as string
     }
 
-    const userText = input || (currentScreenshot ? "Analyze this screen." : "(Audio Input)")
+    const userText = typedInput || (currentScreenshot ? 'Analyze this screen.' : '(Audio Input)')
+    let content: MessageContent = userText
 
-    // Construct User Message Content
-    let content: any = userText
-
-    // If we have a screenshot, format as array for Vision API
     if (currentScreenshot) {
       content = [
-        { type: "text", text: userText },
-        { type: "image_url", image_url: { url: currentScreenshot } }
+        { type: 'text', text: userText },
+        { type: 'image_url', image_url: { url: currentScreenshot } }
       ]
     }
 
-    // Add User Message to State (Text ONLY, no image preview in chat)
     const newMessages = [...messages, { role: 'user' as const, content: userText }]
     setMessages(newMessages)
 
@@ -91,36 +110,30 @@ function App() {
     setIsLoading(true)
 
     try {
-      // Construct message history for API
-
-      let finalUserContent = content
+      let finalUserContent: MessageContent = content
       if (transcriptHistory.trim()) {
         const contextText = `\n\n[Context from Audio Transcript]: ${transcriptHistory}`
-
-        if (Array.isArray(finalUserContent)) {
-          finalUserContent[0].text += contextText
-        } else {
-          finalUserContent += contextText
-        }
+        finalUserContent = Array.isArray(finalUserContent)
+          ? finalUserContent.map((part, index) => {
+            if (index === 0 && part.type === 'text') {
+              return { ...part, text: `${part.text}${contextText}` }
+            }
+            return part
+          })
+          : `${finalUserContent}${contextText}`
       }
 
-      // Create a copy of messages for the API call
-      // We need to be careful: previous messages in state are strings (markdown),
-      // but this new one might be an array (for Vision).
-      // The backend handles the array check.
       const apiMessages = [
-        ...messages.map(m => ({ role: m.role, content: m.content })), // Send previous history as is
+        ...messages.map(m => ({ role: m.role, content: m.content })),
         { role: 'user', content: finalUserContent }
       ]
 
-      const result = await (window as any).ipcRenderer.invoke('ask-groq', apiMessages)
-
-      // Add Assistant Message
+      const result = await window.ipcRenderer.invoke('ask-groq', apiMessages) as string
       setMessages(prev => [...prev, { role: 'assistant', content: result }])
-
       setTranscriptHistory('')
-    } catch (error: any) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${error.message}` }])
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Something went wrong'
+      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${message}` }])
     } finally {
       setIsLoading(false)
     }
@@ -133,149 +146,184 @@ function App() {
     }
   }
 
-  // --- COLLAPSED VIEW (PILL) ---
-  if (!isExpanded) {
-    return (
-      <div className="app-container drag-region">
-        <div className="pill-container">
-          <div className="pill-content" style={{ justifyContent: 'center', gap: '8px' }}>
-            {/* Controls only - Removed Search */}
-            <div className="flex items-center gap-2 no-drag">
-              <span className="text-white font-medium text-sm pr-2 border-r border-white/10 mr-2">Cluely</span>
+  const handleEndSession = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    setMessages([])
+    setInput('')
+    setTranscriptHistory('')
+    setIsListening(false)
+  }
 
-              <button
-                onClick={toggleScreenshotMode}
-                className={`screenshot-btn ${isScreenshotMode ? 'active' : ''}`}
-                title={isScreenshotMode ? "Screen Context: ON" : "Screen Context: OFF"}
-              >
-                <Camera size={16} />
-              </button>
+  const handlePromptSend = (text: string) => {
+    const trimmed = text.trim()
+    if (!trimmed) return
+    void handleSubmit(undefined, trimmed)
+  }
 
-              <div className="no-drag">
-                <AudioRecorder onTranscript={handleTranscript} />
-              </div>
+  const handleCloseClick = async () => {
+    try {
+      await window.ipcRenderer.invoke('close-window')
+    } catch (error) {
+      console.error('close failed', error)
+    }
+  }
 
-              <button
-                onClick={toggleExpand}
-                className="icon-btn"
-                title="Expand"
-              >
-                <ArrowUp size={18} />
-              </button>
-            </div>
+  const renderMessages = () => {
+    if (!messages.length) {
+      return (
+        <div className="talking-points">
+          <ul>
+            {defaultTalkingPoints.map(point => (
+              <li key={point}>{point}</li>
+            ))}
+          </ul>
+          <div className="point-actions">
+            <button className="link-btn">Tell me more</button>
+            <button className="link-btn">Copy</button>
           </div>
         </div>
+      )
+    }
+
+    return (
+      <div className="message-feed">
+        {messages.map((msg, idx) => (
+          <div key={idx} className={`message-row ${msg.role}`}>
+            <div className={`message-bubble ${msg.role}`}>
+              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                {typeof msg.content === 'string' ? msg.content : 'Image context sent.'}
+              </ReactMarkdown>
+            </div>
+          </div>
+        ))}
+        {isLoading && (
+          <div className="message-row assistant">
+            <div className="message-bubble assistant pulse">Composing…</div>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
       </div>
     )
   }
 
-  // --- EXPANDED VIEW (CARD) ---
+  const controlBar = (
+    <div className="control-bar drag-region">
+      <button className="circle-btn ghost" title="Move Julie">
+        <GripVertical size={18} />
+      </button>
+
+      <div className="control-pill no-drag" role="button" tabIndex={0}>
+        <div className="logo-lockup">
+          <div className="logo-mark">
+            <Orbit size={22} />
+          </div>
+          <div>
+            <div className="logo-title">Julie</div>
+            <div className={`status-chip ${isListening ? 'active' : ''}`}>
+              {isListening ? 'Listening' : 'Not listening'}
+            </div>
+          </div>
+        </div>
+
+        <div className="pill-actions">
+          <div className="pill-mic" onClick={e => e.stopPropagation()}>
+            <AudioRecorder onTranscript={handleTranscript} onStateChange={setIsListening} />
+          </div>
+          <button className="pill-end" onClick={handleEndSession}>
+            <CircleDot size={14} />
+            <span>End</span>
+          </button>
+        </div>
+      </div>
+
+      <button className="circle-btn ghost no-drag" title="Hide Julie" onClick={handleCloseClick}>
+        <X size={18} />
+      </button>
+    </div>
+  )
+
   return (
-    <div className="app-container">
-      <div className="cluely-card">
+    <div className="liquid-shell expanded">
+      {controlBar}
 
-        {/* Header */}
-        <div className="card-header drag-region">
-          <div className="flex items-center gap-2 no-drag">
-            <button
-              className={`tab-button ${activeTab === 'Chat' ? 'active' : ''}`}
-              onClick={() => setActiveTab('Chat')}
-            >
-              Chat
-            </button>
-            <button
-              className={`tab-button ${activeTab === 'Transcript' ? 'active' : ''}`}
-              onClick={() => setActiveTab('Transcript')}
-            >
-              Transcript
-            </button>
+      <div className="experience-card">
+        <div className="card-header">
+          <div className="left">
+            <Eye size={18} />
+            <div className="scenario-select">
+              <span>{scenario}</span>
+              <ChevronDown size={16} />
+              <select value={scenario} onChange={e => setScenario(e.target.value)}>
+                {scenarioOptions.map(option => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </div>
           </div>
-
-          <div className="header-spacer drag-region" />
-
-          <div className="flex items-center gap-2 no-drag">
-            <button
-              onClick={toggleExpand}
-              className="icon-btn ghost"
-            >
-              <X size={18} />
+          <div className="right">
+            <button className="link-btn" onClick={() => setShowTranscript(prev => !prev)}>
+              {showTranscript ? 'Hide Transcript' : 'Show Transcript'}
             </button>
+            <button className="cta secondary">Follow up questions</button>
           </div>
         </div>
 
-        {/* Content Area (Chat History) */}
-        <div className="card-content no-drag">
-          {messages.length === 0 ? (
-            <div className="text-white/30 text-center mt-8 flex flex-col items-center gap-2">
-              <Sparkles size={24} className="text-white/20" />
-              <p>{transcriptHistory ? "Listening..." : "Ready to assist."}</p>
-            </div>
-          ) : (
-            messages.map((msg, idx) => (
-              <div key={idx} className={`message-row ${msg.role}`}>
-                <div className={`message-bubble ${msg.role}`}>
-                  <ReactMarkdown
-                    remarkPlugins={[remarkMath]}
-                    rehypePlugins={[rehypeKatex]}
-                  >
-                    {typeof msg.content === 'string' ? msg.content : 'Image Content'}
-                  </ReactMarkdown>
-                </div>
-              </div>
-            ))
-          )}
-          {isLoading && (
-            <div className="message-row assistant">
-              <div className="message-bubble assistant text-white/50 animate-pulse">
-                Thinking...
-              </div>
-            </div>
-          )}
-          <div ref={messagesEndRef} />
+        {showTranscript && (
+          <div className="transcript-panel">
+            <strong>Live transcript</strong>
+            <p>{transcriptHistory || 'Transcript will appear here once you start speaking.'}</p>
+          </div>
+        )}
+
+        <div className="insight-body">
+          {renderMessages()}
         </div>
 
-        {/* Quick Actions */}
-        <div className="quick-actions no-drag">
-          <div className="action-item"><Sparkles size={14} /> Assist</div>
-          <div className="action-item"><Wand2 size={14} /> What should I say next?</div>
-          <div className="action-item"><MessageSquare size={14} /> Follow-up questions</div>
-          <div className="action-item"><RefreshCw size={14} /> Recap</div>
-        </div>
-
-        {/* Input Area */}
-        <div className="input-area no-drag">
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask, ⌘ ↵ to start typing"
-            className="input-field"
-            rows={1}
-          />
-
-          <div className="input-footer">
-            <div className="left-controls flex items-center gap-2">
-              <button
-                onClick={toggleScreenshotMode}
-                className={`screenshot-btn ${isScreenshotMode ? 'active' : ''}`}
-                title={isScreenshotMode ? "Screen Context: ON" : "Screen Context: OFF"}
-              >
-                <Camera size={16} />
+        <div className="action-row">
+          {quickActions.map(action => {
+            const Icon = action.icon
+            return (
+              <button key={action.label} className="action-chip" onClick={() => handlePromptSend(action.label)}>
+                <Icon size={16} />
+                {action.label}
               </button>
-              <AudioRecorder onTranscript={handleTranscript} />
-            </div>
-
-            <button
-              className="send-button"
-              onClick={() => handleSubmit()}
-              disabled={isLoading || (!input.trim() && !transcriptHistory.trim())}
-            >
-              <ArrowUp size={18} />
-            </button>
-          </div>
+            )
+          })}
         </div>
 
+        <form className="input-panel" onSubmit={handleSubmit}>
+          <div className="input-shell">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="What do you look for in grantees?"
+              rows={2}
+            />
+            <div className="input-helpers">
+              <button type="button" className={`helper-btn ${isScreenshotMode ? 'active' : ''}`} onClick={toggleScreenshotMode}>
+                <Camera size={15} />
+                Screen
+              </button>
+              <button type="button" className="helper-btn">
+                <ArrowUpRight size={15} />
+                Get Answer
+              </button>
+            </div>
+          </div>
+          <button className="submit-btn" disabled={isLoading}>
+            {isLoading ? 'Sending…' : 'Submit'}
+          </button>
+        </form>
+      </div>
+
+      <div className="suggestion-cloud">
+        {suggestionChips.map(chip => (
+          <button key={chip} className="suggestion-chip" onClick={() => handlePromptSend(chip)}>
+            {chip}
+          </button>
+        ))}
       </div>
     </div>
   )

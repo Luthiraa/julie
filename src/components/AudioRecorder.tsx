@@ -1,14 +1,27 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { Mic, Square } from 'lucide-react'
 
 interface AudioRecorderProps {
     onTranscript: (text: string) => void
+    onStateChange?: (isListening: boolean) => void
 }
 
-export function AudioRecorder({ onTranscript }: AudioRecorderProps) {
+export function AudioRecorder({ onTranscript, onStateChange }: AudioRecorderProps) {
     const [isListening, setIsListening] = useState(false)
     const mediaRecorderRef = useRef<MediaRecorder | null>(null)
     const intervalRef = useRef<number | null>(null)
+
+    const stopRecording = useCallback(() => {
+        if (mediaRecorderRef.current) {
+            mediaRecorderRef.current.stop()
+            mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop())
+        }
+        if (intervalRef.current) {
+            clearInterval(intervalRef.current)
+        }
+        setIsListening(false)
+        onStateChange?.(false)
+    }, [onStateChange])
 
     const startRecording = async () => {
         try {
@@ -20,7 +33,8 @@ export function AudioRecorder({ onTranscript }: AudioRecorderProps) {
                 if (event.data.size > 0) {
                     const buffer = await event.data.arrayBuffer()
                     try {
-                        const text = await (window as any).ipcRenderer.invoke('transcribe-audio', buffer)
+                        if (!window.ipcRenderer) return
+                        const text = await window.ipcRenderer.invoke('transcribe-audio', buffer) as string
                         if (text && text.trim()) {
                             onTranscript(text)
                         }
@@ -32,6 +46,7 @@ export function AudioRecorder({ onTranscript }: AudioRecorderProps) {
 
             mediaRecorder.start()
             setIsListening(true)
+            onStateChange?.(true)
 
             // Chunk audio every 3 seconds
             intervalRef.current = window.setInterval(() => {
@@ -47,22 +62,7 @@ export function AudioRecorder({ onTranscript }: AudioRecorderProps) {
         }
     }
 
-    const stopRecording = () => {
-        if (mediaRecorderRef.current) {
-            mediaRecorderRef.current.stop()
-            mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop())
-        }
-        if (intervalRef.current) {
-            clearInterval(intervalRef.current)
-        }
-        setIsListening(false)
-    }
-
-    useEffect(() => {
-        return () => {
-            stopRecording()
-        }
-    }, [])
+    useEffect(() => stopRecording, [stopRecording])
 
     return (
         <button
