@@ -14,8 +14,8 @@ const groq = new Groq({
     dangerouslyAllowBrowser: false
 });
 
-const CLUELY_SYSTEM_PROMPT = `
-You are Cluely, a helpful and precise AI assistant.
+const JULIE_SYSTEM_PROMPT = `
+You are Julie, a helpful and precise AI assistant.
 
 CORE RULES:
 1.  **Answer Directly**: Do not analyze the user's intent out loud. Do not say "The user wants...". Just give the answer.
@@ -70,13 +70,13 @@ ipcMain.handle('capture-screen', async () => {
         const primarySource = sources[0]; // Usually the first one is the main screen
         const image = primarySource.thumbnail.toDataURL();
 
-    win.show(); // Restore window
-    return image;
-  } catch (error) {
-    console.error("Screen Capture Error:", error);
-    win.show(); // Ensure window comes back even on error
-    return null;
-  }
+        win.show(); // Restore window
+        return image;
+    } catch (error) {
+        console.error("Screen Capture Error:", error);
+        win.show(); // Ensure window comes back even on error
+        return null;
+    }
 });
 
 ipcMain.handle('close-window', () => {
@@ -120,7 +120,7 @@ ipcMain.handle('ask-groq', async (_, messages: any[]) => {
     // Prepend system prompt if not already present
     // We construct the full message chain here to ensure system prompt is always first
     const fullMessages = [
-        { role: "system", content: CLUELY_SYSTEM_PROMPT },
+        { role: "system", content: JULIE_SYSTEM_PROMPT },
         ...(Array.isArray(messages) ? messages : [{ role: "user", content: String(messages) }])
     ];
 

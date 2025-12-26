@@ -1,5 +1,5 @@
 {
-  "name": "ruby-pulsar",
+  "name": "julie",
   "private": true,
   "version": "0.0.0",
   "main": "dist-electron/main.js",
@@ -41,8 +41,8 @@
     "vite-plugin-electron-renderer": "^0.14.6"
   },
   "build": {
-    "appId": "com.liquidglass.app",
-    "productName": "Liquid Glass",
+    "appId": "com.julie.app",
+    "productName": "Julie",
     "mac": {
       "category": "public.app-category.utilities",
       "target": [
