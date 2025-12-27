@@ -52,6 +52,15 @@
       "hardenedRuntime": true,
       "gatekeeperAssess": false
     },
+    "win": {
+      "target": "nsis",
+      "icon": "public/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
     "directories": {
       "output": "release/${version}"
     },

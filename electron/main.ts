@@ -166,11 +166,21 @@ function createWindow() {
 
     // Privacy: Hide from screen sharing/screenshots and Mission Control
     win.setContentProtection(true)
-    win.setHiddenInMissionControl(true)
+
+    if (process.platform === 'darwin') {
+        win.setHiddenInMissionControl(true)
+    } else {
+        win.setSkipTaskbar(true)
+    }
 
     // Visibility: Always on top of EVERYTHING (including full-screen apps)
     win.setAlwaysOnTop(true, 'screen-saver')
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+
+    // Windows-specific: Set App User Model ID for notifications
+    if (process.platform === 'win32') {
+        app.setAppUserModelId('com.julie.app')
+    }
 
     // IPC: Resize Window
     ipcMain.handle('resize-window', (_, { width, height }) => {
