@@ -37,7 +37,6 @@ Get the latest version from the **[Releases Page](https://github.com/Luthiraa/ju
 *   **👻 Invisible Interface**: A transparent window that blends into your desktop.
 *   **🖱️ Ghost Mode**: Click-through capability (`Cmd+Shift+I`) to keep Julie visible while you work.
 *   **🧠 AI-Powered**: Uses **Groq** (Llama 3 70B & Llama 4 Scout) for instant, reasoning-heavy responses.
-*   **🔒 Privacy Focused**: Automatically hides from screen sharing and screenshots.
 *   **👁️ Vision**: One-click analysis of your current screen content.
 
 ## ⌨️ Shortcuts
