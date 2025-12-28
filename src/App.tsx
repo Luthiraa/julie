@@ -4,40 +4,29 @@ import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 import {
-  GripVertical,
-  Orbit,
-  CircleDot,
   X,
   Eye,
+  EyeOff,
   ChevronDown,
   MessageSquare,
   Sparkles,
-  ListChecks,
-  HelpCircle,
   RefreshCw,
-  ArrowUpRight,
-  Camera
+  ArrowUp,
+  Home,
+  Zap,
+  Monitor,
+  LayoutGrid
 } from 'lucide-react'
 import './index.css'
 import './App.css'
 import { AudioRecorder } from './components/AudioRecorder'
 
-const scenarioOptions = ['Hardware Grants', 'Sales', 'Board Meetings']
+const scenarioOptions = ['Cluely for Sales (Roy)', 'Hardware Grants', 'Board Meetings']
 const quickActions = [
-  { label: 'What should I say next?', icon: MessageSquare },
-  { label: 'Follow-up questions', icon: Sparkles },
-  { label: 'Who am I talking to?', icon: HelpCircle },
-  { label: 'Fact-check', icon: ListChecks },
+  { label: 'Assist', icon: Sparkles },
+  { label: 'What should I say next?', icon: MessageSquare }, // Using MessageSquare as placeholder
+  { label: 'Follow-up questions', icon: MessageSquare },
   { label: 'Recap', icon: RefreshCw }
-]
-const suggestionChips = [
-  'What do you look for in grantees?',
-  'Define data processing pipeline',
-  'Define signal quality'
-]
-const defaultTalkingPoints = [
-  'What signal acquisition method are you using (EEG, ECoG, invasive, non-invasive)?',
-  "What’s the planned data processing pipeline (on-device, cloud, hybrid)?"
 ]
 
 type Role = 'user' | 'assistant'
@@ -49,13 +38,33 @@ type ChatMessage = { role: Role; content: MessageContent }
 
 function App() {
   const [input, setInput] = useState('')
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      role: 'user',
+      content: 'Is it secure? We handle sensitive data.'
+    },
+    {
+      role: 'assistant',
+      content: "We're SOC2 compliant, use end-to-end encryption, and your data is private to your org. Plus, you control what's stored and can request deletion anytime."
+    }
+  ])
   const [isLoading, setIsLoading] = useState(false)
   const [scenario, setScenario] = useState(scenarioOptions[0])
   const [transcriptHistory, setTranscriptHistory] = useState('')
-  const [showTranscript, setShowTranscript] = useState(false)
+  const [activeTab, setActiveTab] = useState<'Chat' | 'Transcript'>('Chat')
   const [isScreenshotMode, setIsScreenshotMode] = useState(false)
-  const [isListening, setIsListening] = useState(false)
+  const [isPrivacyMode, setIsPrivacyMode] = useState(false)
+  const [isSmartMode, setIsSmartMode] = useState(false)
+
+  // Settings State
+  const [showSettings, setShowSettings] = useState(false)
+  const [apiKey, setApiKey] = useState('')
+  const [scenarios, setScenarios] = useState<string[]>(() => {
+    const saved = localStorage.getItem('julie_scenarios')
+    return saved ? JSON.parse(saved) : scenarioOptions
+  })
+  const [newScenario, setNewScenario] = useState('')
+
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -63,10 +72,35 @@ function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  // Save API Key Handler
+  const handleSaveApiKey = async () => {
+    if (!apiKey.trim()) return
+    try {
+      await window.ipcRenderer.invoke('set-api-key', apiKey.trim())
+      alert('API Key Saved!')
+      setApiKey('')
+    } catch (e) {
+      console.error(e)
+      alert('Failed to save API Key')
+    }
+  }
+
+  // Add Scenario Handler
+  const handleAddScenario = () => {
+    if (!newScenario.trim()) return
+    const updated = [...scenarios, newScenario.trim()]
+    setScenarios(updated)
+    setScenario(newScenario.trim()) // Select it
+    localStorage.setItem('julie_scenarios', JSON.stringify(updated))
+    setNewScenario('')
+  }
+
+  const toggleSettings = () => setShowSettings(!showSettings)
+
   useEffect(() => {
     const resize = async () => {
       try {
-        await window.ipcRenderer.invoke('resize-window', { width: 960, height: 820 })
+        await window.ipcRenderer.invoke('resize-window', { width: 800, height: 600 })
       } catch (error) {
         console.debug('resize skipped', error)
       }
@@ -80,7 +114,21 @@ function App() {
   }
 
   const toggleScreenshotMode = () => {
-    setIsScreenshotMode(prev => !prev)
+    const newState = !isScreenshotMode
+    setIsScreenshotMode(newState)
+    console.log(newState ? 'use screen enabled' : 'use screen disabled')
+  }
+
+  const togglePrivacyMode = async () => {
+    const newMode = !isPrivacyMode
+    setIsPrivacyMode(newMode)
+    try {
+      await window.ipcRenderer.invoke('set-content-protection', newMode)
+      console.log('Privacy Mode:', newMode)
+    } catch (error) {
+      console.error('Failed to toggle privacy mode:', error)
+      setIsPrivacyMode(!newMode) // Revert on failure
+    }
   }
 
   const handleSubmit = async (e?: React.FormEvent, overrideText?: string) => {
@@ -128,7 +176,7 @@ function App() {
         { role: 'user', content: finalUserContent }
       ]
 
-      const result = await window.ipcRenderer.invoke('ask-groq', apiMessages) as string
+      const result = await window.ipcRenderer.invoke('ask-groq', { messages: apiMessages, isSmart: isSmartMode }) as string
       setMessages(prev => [...prev, { role: 'assistant', content: result }])
       setTranscriptHistory('')
     } catch (error) {
@@ -146,14 +194,6 @@ function App() {
     }
   }
 
-  const handleEndSession = (e?: React.MouseEvent) => {
-    if (e) e.stopPropagation()
-    setMessages([])
-    setInput('')
-    setTranscriptHistory('')
-    setIsListening(false)
-  }
-
   const handlePromptSend = (text: string) => {
     const trimmed = text.trim()
     if (!trimmed) return
@@ -168,23 +208,52 @@ function App() {
     }
   }
 
-  const renderMessages = () => {
-    if (!messages.length) {
-      return (
-        <div className="talking-points">
-          <ul>
-            {defaultTalkingPoints.map(point => (
-              <li key={point}>{point}</li>
+  const settingsOverlay = (
+    <div className="settings-overlay">
+      <div className="settings-modal">
+        <div className="settings-header">
+          <h3>Settings</h3>
+          <button className="icon-btn-plain" onClick={() => setShowSettings(false)}><X size={20} /></button>
+        </div>
+
+        <div className="settings-section">
+          <label>Groq API Key</label>
+          <div className="input-group">
+            <input
+              type="password"
+              placeholder="gsk_..."
+              value={apiKey}
+              onChange={e => setApiKey(e.target.value)}
+            />
+            <button className="pill-btn blue" onClick={handleSaveApiKey}>Save</button>
+          </div>
+          <p className="hint">Enter your key to override the default.</p>
+        </div>
+
+        <div className="settings-section">
+          <label>Custom Julies (Personas)</label>
+          <div className="input-group">
+            <input
+              type="text"
+              placeholder="e.g. Code Reviewer"
+              value={newScenario}
+              onChange={e => setNewScenario(e.target.value)}
+            />
+            <button className="pill-btn blue" onClick={handleAddScenario}>Add</button>
+          </div>
+          <ul className="scenario-list">
+            {scenarios.map(s => (
+              <li key={s} onClick={() => { setScenario(s); setShowSettings(false); }}>
+                {s} {s === scenario && <span className="active-tag">(Active)</span>}
+              </li>
             ))}
           </ul>
-          <div className="point-actions">
-            <button className="link-btn">Tell me more</button>
-            <button className="link-btn">Copy</button>
-          </div>
         </div>
-      )
-    }
+      </div>
+    </div>
+  )
 
+  const renderMessages = () => {
     return (
       <div className="message-feed">
         {messages.map((msg, idx) => (
@@ -206,124 +275,121 @@ function App() {
     )
   }
 
-  const controlBar = (
-    <div className="control-bar drag-region">
-      <button className="circle-btn ghost" title="Move Julie">
-        <GripVertical size={18} />
-      </button>
-
-      <div className="control-pill no-drag" role="button" tabIndex={0}>
-        <div className="logo-lockup">
-          <div className="logo-mark">
-            <Orbit size={22} />
-          </div>
-          <div>
-            <div className="logo-title">Julie</div>
-            <div className={`status-chip ${isListening ? 'active' : ''}`}>
-              {isListening ? 'Listening' : 'Not listening'}
-            </div>
-          </div>
-        </div>
-
-        <div className="pill-actions">
-          <div className="pill-mic" onClick={e => e.stopPropagation()}>
-            <AudioRecorder onTranscript={handleTranscript} onStateChange={setIsListening} />
-          </div>
-          <button className="pill-end" onClick={handleEndSession}>
-            <CircleDot size={14} />
-            <span>End</span>
-          </button>
-        </div>
+  // Floating Control Bar
+  const floatingControlBar = (
+    <div className="floating-dock drag-region">
+      <div className="dock-content no-drag">
+        <button
+          className={`dock-btn ${isPrivacyMode ? 'active-privacy' : ''}`}
+          onClick={togglePrivacyMode}
+          title={isPrivacyMode ? "Hidden from Screen Capture" : "Visible to Screen Capture"}
+        >
+          {isPrivacyMode ? <EyeOff size={18} /> : <Eye size={18} />}
+        </button>
+        <div className="dock-divider" />
+        <AudioRecorder
+          onTranscript={handleTranscript}
+          className="dock-btn"
+        />
+        <div className="dock-divider" />
+        <button className="dock-btn"><ChevronDown size={18} /></button>
+        <div className="dock-divider" />
+        <button className="dock-btn" onClick={toggleSettings}><LayoutGrid size={18} /></button>
       </div>
-
-      <button className="circle-btn ghost no-drag" title="Hide Julie" onClick={handleCloseClick}>
+      <button className="dock-close no-drag" onClick={handleCloseClick}>
         <X size={18} />
       </button>
     </div>
   )
 
   return (
-    <div className="liquid-shell expanded">
-      {controlBar}
+    <div className="liquid-shell">
+      {showSettings && settingsOverlay}
+      {floatingControlBar}
 
       <div className="experience-card">
-        <div className="card-header">
-          <div className="left">
-            <Eye size={18} />
-            <div className="scenario-select">
-              <span>{scenario}</span>
-              <ChevronDown size={16} />
-              <select value={scenario} onChange={e => setScenario(e.target.value)}>
-                {scenarioOptions.map(option => (
-                  <option key={option} value={option}>{option}</option>
-                ))}
-              </select>
+        {/* ... existing header ... */}
+        <div className="card-header drag-region">
+          <div className="header-left no-drag">
+            <button className="icon-btn-plain"><Home size={20} /></button>
+            <div className="tab-group">
+              <button
+                className={`tab-pill ${activeTab === 'Chat' ? 'active' : ''}`}
+                onClick={() => setActiveTab('Chat')}
+              >
+                Chat
+              </button>
+              <button
+                className={`tab-pill ${activeTab === 'Transcript' ? 'active' : ''}`}
+                onClick={() => setActiveTab('Transcript')}
+              >
+                Transcript
+              </button>
             </div>
           </div>
-          <div className="right">
-            <button className="link-btn" onClick={() => setShowTranscript(prev => !prev)}>
-              {showTranscript ? 'Hide Transcript' : 'Show Transcript'}
-            </button>
-            <button className="cta secondary">Follow up questions</button>
-          </div>
+          <button className="icon-btn-plain no-drag"><ArrowUp size={18} style={{ transform: 'rotate(45deg)' }} /></button>
         </div>
 
-        {showTranscript && (
-          <div className="transcript-panel">
-            <strong>Live transcript</strong>
-            <p>{transcriptHistory || 'Transcript will appear here once you start speaking.'}</p>
-          </div>
-        )}
-
+        {/* Content Body */}
         <div className="insight-body">
-          {renderMessages()}
-        </div>
-
-        <div className="action-row">
-          {quickActions.map(action => {
-            const Icon = action.icon
-            return (
-              <button key={action.label} className="action-chip" onClick={() => handlePromptSend(action.label)}>
-                <Icon size={16} />
-                {action.label}
-              </button>
-            )
-          })}
-        </div>
-
-        <form className="input-panel" onSubmit={handleSubmit}>
-          <div className="input-shell">
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="What do you look for in grantees?"
-              rows={2}
-            />
-            <div className="input-helpers">
-              <button type="button" className={`helper-btn ${isScreenshotMode ? 'active' : ''}`} onClick={toggleScreenshotMode}>
-                <Camera size={15} />
-                Screen
-              </button>
-              <button type="button" className="helper-btn">
-                <ArrowUpRight size={15} />
-                Get Answer
-              </button>
+          {activeTab === 'Chat' ? renderMessages() : (
+            <div className="transcript-view">
+              <p>{transcriptHistory || "No live transcript yet..."}</p>
             </div>
-          </div>
-          <button className="submit-btn" disabled={isLoading}>
-            {isLoading ? 'Sending…' : 'Submit'}
-          </button>
-        </form>
-      </div>
+          )}
+        </div>
 
-      <div className="suggestion-cloud">
-        {suggestionChips.map(chip => (
-          <button key={chip} className="suggestion-chip" onClick={() => handlePromptSend(chip)}>
-            {chip}
-          </button>
-        ))}
+        {/* Quick Actions Row */}
+        <div className="quick-actions-text">
+          {quickActions.map(action => (
+            <button key={action.label} className="text-action-btn" onClick={() => handlePromptSend(action.label)}>
+              <action.icon size={14} />
+              <span>{action.label}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Input Area */}
+        <div className="input-container">
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask, ⌘ ↵ to start typing"
+            rows={1}
+          />
+
+          <div className="input-footer">
+            <div className="footer-left">
+              <button
+                className={`pill-btn blue ${isScreenshotMode ? 'active' : ''}`}
+                onClick={toggleScreenshotMode}
+              >
+                <Monitor size={14} />
+                Use Screen
+              </button>
+              <button
+                className={`pill-btn ${isSmartMode ? 'blue' : 'ghost'}`}
+                onClick={() => setIsSmartMode(!isSmartMode)}
+              >
+                <Zap size={14} fill={isSmartMode ? "currentColor" : "none"} />
+                Smart
+              </button>
+              <div className="footer-divider" />
+              <div className="scenario-dropdown">
+                <span>{scenario}</span>
+                <ChevronDown size={14} />
+                <select value={scenario} onChange={e => setScenario(e.target.value)}>
+                  {scenarios.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                </select>
+              </div>
+            </div>
+            <button className="send-circle-btn" onClick={() => handleSubmit()}>
+              <ArrowUp size={18} />
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   )

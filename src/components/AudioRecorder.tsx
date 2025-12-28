@@ -4,9 +4,10 @@ import { Mic, Square } from 'lucide-react'
 interface AudioRecorderProps {
     onTranscript: (text: string) => void
     onStateChange?: (isListening: boolean) => void
+    className?: string
 }
 
-export function AudioRecorder({ onTranscript, onStateChange }: AudioRecorderProps) {
+export function AudioRecorder({ onTranscript, onStateChange, className }: AudioRecorderProps) {
     const [isListening, setIsListening] = useState(false)
     const mediaRecorderRef = useRef<MediaRecorder | null>(null)
     const intervalRef = useRef<number | null>(null)
@@ -67,7 +68,7 @@ export function AudioRecorder({ onTranscript, onStateChange }: AudioRecorderProp
     return (
         <button
             onClick={isListening ? stopRecording : startRecording}
-            className={`icon-btn ${isListening ? 'recording' : ''}`}
+            className={`${className || 'icon-btn'} ${isListening ? 'recording' : ''}`}
             title={isListening ? "Stop Listening" : "Start Listening"}
         >
             {isListening ? (
