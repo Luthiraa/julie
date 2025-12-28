@@ -69,7 +69,7 @@ function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
   }, [messages])
 
   // Save API Key Handler
