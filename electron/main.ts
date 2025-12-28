@@ -10,6 +10,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // Initialize Groq
 let currentApiKey = process.env.GROQ_API_KEY || '';
+if (currentApiKey && !currentApiKey.startsWith('gsk_')) {
+    console.error("Warning: GROQ_API_KEY environment variable does not start with 'gsk_'. Ignoring it.");
+    currentApiKey = '';
+}
+
 let groq = new Groq({
     apiKey: currentApiKey || 'gsk_placeholder',
     dangerouslyAllowBrowser: false
@@ -17,6 +22,10 @@ let groq = new Groq({
 
 // Helper to update Groq client
 function updateGroqClient(newKey: string) {
+    if (!newKey || !newKey.startsWith('gsk_')) {
+        console.error("Invalid API Key received. Must start with 'gsk_'. Aborting update.");
+        return;
+    }
     currentApiKey = newKey;
     groq = new Groq({
         apiKey: currentApiKey,
@@ -41,6 +50,7 @@ FORMATTING:
 `
 
 ipcMain.handle('set-api-key', (_, key: string) => {
+    console.log("Received request to update API Key via IPC.");
     updateGroqClient(key);
     return true;
 });
@@ -145,18 +155,7 @@ ipcMain.handle('ask-groq', async (_, args: any) => {
     let model = "llama-3.3-70b-versatile"; // Default
 
     if (hasImage) {
-        model = "meta-llama/llama-3.2-11b-vision-instruct"; // Updated vision model name just in case, sticking to previous for now if it worked
-        // Actually, let's keep the one from before if it was working: "meta-llama/llama-4-scout-17b-16e-instruct"
-        // Wait, the previous code had "meta-llama/llama-4-scout-17b-16e-instruct" ?? Let me check the file content. 
-        // Ah, looking at the previous file content (Step 151):
-        // const model = hasImage ? "meta-llama/llama-4-scout-17b-16e-instruct" : "llama-3.3-70b-versatile";
-        // I should keep that.
-        model = "meta-llama/llama-3.2-11b-vision-instruct"; // Reverting to a known vision model or keeping the one user had? 
-        // The user had llama-4-scout. I will respect that.
-        model = "meta-llama/llama-3.2-11b-vision-instruct";
-        // WAIT. I don't want to break vision. I'll read the file content again to be sure.
-        // Actually, I'll trust my read. It says "llama-4-scout-17b-16e-instruct". I'll use it.
-        model = "meta-llama/llama-3.2-11b-vision-instruct"; // Actually Llama 3.2 Vision is better supported publicly.
+        model = "meta-llama/llama-4-scout-17b-16e-instruct";
     } else if (isSmart) {
         model = "llama-3.3-70b-versatile"; // Fallback to best available Llama model
         console.log("Using Smart Model: llama-3.3-70b-versatile");

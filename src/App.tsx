@@ -58,7 +58,7 @@ function App() {
 
   // Settings State
   const [showSettings, setShowSettings] = useState(false)
-  const [apiKey, setApiKey] = useState('')
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('julie_api_key') || '')
   const [scenarios, setScenarios] = useState<string[]>(() => {
     const saved = localStorage.getItem('julie_scenarios')
     return saved ? JSON.parse(saved) : scenarioOptions
@@ -76,9 +76,9 @@ function App() {
   const handleSaveApiKey = async () => {
     if (!apiKey.trim()) return
     try {
+      localStorage.setItem('julie_api_key', apiKey.trim())
       await window.ipcRenderer.invoke('set-api-key', apiKey.trim())
       alert('API Key Saved!')
-      setApiKey('')
     } catch (e) {
       console.error(e)
       alert('Failed to save API Key')
@@ -98,14 +98,19 @@ function App() {
   const toggleSettings = () => setShowSettings(!showSettings)
 
   useEffect(() => {
-    const resize = async () => {
+    const init = async () => {
+      const storedKey = localStorage.getItem('julie_api_key')
+      if (storedKey) {
+        window.ipcRenderer.invoke('set-api-key', storedKey)
+      }
+
       try {
         await window.ipcRenderer.invoke('resize-window', { width: 800, height: 600 })
       } catch (error) {
         console.debug('resize skipped', error)
       }
     }
-    resize()
+    init()
     setTimeout(() => inputRef.current?.focus(), 200)
   }, [])
 
