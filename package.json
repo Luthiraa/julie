@@ -1,7 +1,7 @@
 {
   "name": "julie",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.1",
   "main": "dist-electron/main.js",
   "type": "module",
   "scripts": {
@@ -43,6 +43,7 @@
   "build": {
     "appId": "com.julie.app",
     "productName": "Julie",
+    "compression": "maximum",
     "mac": {
       "category": "public.app-category.utilities",
       "target": [

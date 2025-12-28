@@ -1,2 +1,2 @@
-import { ipcRenderer } from "electron";
-window.ipcRenderer = ipcRenderer;
+import { ipcRenderer as e } from "electron";
+window.ipcRenderer = e;

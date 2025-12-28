@@ -8,8 +8,9 @@ Julie is a minimal, transparent AI assistant designed to integrate seamlessly in
 
 You can find the latest release installers in the **[Releases](https://github.com/Luthiraa/julie/releases)** section.
 
-- **macOS**: [`Julie-0.0.0-arm64.dmg`](https://github.com/Luthiraa/julie/releases/download/v0.0.0/Julie-0.0.0-arm64.dmg) (Apple Silicon)
-- **Windows**: [`Julie Setup 0.0.0.exe`](https://github.com/Luthiraa/julie/releases/download/v0.0.0/Julie%20Setup%200.0.0.exe) (Universal)
+- **macOS (Apple Silicon)**: [`Julie-0.0.1-arm64.dmg`](https://github.com/Luthiraa/julie/releases/download/v0.0.1/Julie-0.0.1-arm64.dmg)
+- **Windows (x64)**: [`Julie-Setup-0.0.1-x64.exe`](https://github.com/Luthiraa/julie/releases/download/v0.0.1/Julie-Setup-0.0.1-x64.exe)
+- **Windows (ARM64)**: [`Julie-Setup-0.0.1-arm64.exe`](https://github.com/Luthiraa/julie/releases/download/v0.0.1/Julie-Setup-0.0.1-arm64.exe)
 
 ## Features
 
