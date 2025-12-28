@@ -1,45 +1,55 @@
-# Julie
+<div align="center">
+  <img src="public/icon.png" alt="Julie Icon" width="120" height="120" />
+  <h1>Julie</h1>
+  <p>
+    <strong>Fully invisible AI assistant for an unfair advantage.</strong>
+  </p>
+  <p>
+    <a href="https://github.com/Luthiraa/julie/releases">
+      <img src="https://img.shields.io/github/v/release/Luthiraa/julie?style=flat-square&color=black" alt="Latest Release" />
+    </a>
+    <a href="#license">
+      <img src="https://img.shields.io/badge/license-MIT-gray?style=flat-square" alt="License" />
+    </a>
+  </p>
+</div>
 
-> Fully invisible AI assistant for an unfair advantage.
+---
 
-Julie is a minimal, transparent AI assistant designed to integrate seamlessly into your workflow without getting in your way.
+**Julie** is a minimal, transparent AI assistant designed to integrate seamlessly into your workflow without getting in your way. It floats above your applications, ready to assist via voice or text, while remaining completely unobtrusive.
 
-## Downloads
+## 💾 Downloads
 
-You can find the latest release installers in the **[Releases](https://github.com/Luthiraa/julie/releases)** section.
+Get the latest version from the **[Releases Page](https://github.com/Luthiraa/julie/releases)**.
 
-- **macOS (Apple Silicon)**: [`Julie-0.0.1-arm64.dmg`](https://github.com/Luthiraa/julie/releases/download/v0.0.1/Julie-0.0.1-arm64.dmg)
-- **Windows (x64)**: [`Julie-Setup-0.0.1-x64.exe`](https://github.com/Luthiraa/julie/releases/download/v0.0.1/Julie-Setup-0.0.1-x64.exe)
-- **Windows (ARM64)**: [`Julie-Setup-0.0.1-arm64.exe`](https://github.com/Luthiraa/julie/releases/download/v0.0.1/Julie-Setup-0.0.1-arm64.exe)
+| OS | Architecture | Installer |
+| :--- | :--- | :--- |
+| **macOS** | Apple Silicon (M1/M2/M3) | [`Julie-0.0.1-arm64.dmg`](https://github.com/Luthiraa/julie/releases/download/v0.0.1/Julie-0.0.1-arm64.dmg) |
+| **Windows** | x64 (Standard) | [`Julie-Setup-0.0.1-x64.exe`](https://github.com/Luthiraa/julie/releases/download/v0.0.1/Julie-Setup-0.0.1-x64.exe) |
+| **Windows** | ARM64 (Surface/Snapdragon) | [`Julie-Setup-0.0.1-arm64.exe`](https://github.com/Luthiraa/julie/releases/download/v0.0.1/Julie-Setup-0.0.1-arm64.exe) |
 
-## Features
+## ✨ Features
 
-- **Invisible Interface**: Fully transparent window that floats above your work.
-- **Ghost Mode**: Click-through capability to keep Julie on screen while you interact with other apps.
-- **AI-Powered**: Built with advanced AI models to provide instant, context-aware assistance.
-- **Privacy Focused**: Hides from screen sharing and screenshots.
+*   **👻 Invisible Interface**: A transparent window that blends into your desktop.
+*   **🖱️ Ghost Mode**: Click-through capability (`Cmd+Shift+I`) to keep Julie visible while you work.
+*   **🧠 AI-Powered**: Uses **Groq** (Llama 3 70B & Llama 4 Scout) for instant, reasoning-heavy responses.
+*   **🔒 Privacy Focused**: Automatically hides from screen sharing and screenshots.
+*   **👁️ Vision**: One-click analysis of your current screen content.
 
-## Shortcuts / Keybindings
+## ⌨️ Shortcuts
 
-### macOS
-- **Toggle Ghost Mode (Click-through)**: `Cmd + Shift + I`
-- **Toggle Visibility**: `Cmd + ]`
-- **Move Window**: `Cmd + Arrow Keys`
+| Action | macOS | Windows |
+| :--- | :--- | :--- |
+| **Ghost Mode** | `Cmd + Shift + I` | `Ctrl + Shift + I` |
+| **Toggle Visibility** | `Cmd + ]` | `Ctrl + ]` |
+| **Move Window** | `Cmd + Arrow Keys` | `Ctrl + Arrow Keys` |
 
-### Windows
-- **Toggle Ghost Mode (Click-through)**: `Ctrl + Shift + I`
-- **Toggle Visibility**: `Ctrl + ]`
-- **Move Window**: `Ctrl + Arrow Keys`
+## 🚀 Setup
 
-## Setup Instructions
-
-1.  **Download & Install**: Grab the installer for your OS from the [Downloads](#downloads) section above.
-2.  **API Key**:
-    - Launch the app.
-    - Go to Settings (Grid icon).
-    - Enter your [Groq API Key](https://console.groq.com/keys). The key must start with `gsk_`.
-    - Click "Save".
-3.  **Start Using**:
-    - Type naturally to chat.
-    - Use "Smart Mode" for complex reasoning (uses Llama 3 70B).
-    - Use "Use Screen" to analyze what's on your primary display.
+1.  **Install**: Download and install the app for your OS.
+2.  **Configure API**:
+    *   Launch Julie.
+    *   Click the **Grid Icon** to open Settings.
+    *   Enter your **[Groq API Key](https://console.groq.com/keys)** (starts with `gsk_`).
+    *   Click **Save**.
+3.  **Chat**: Type or speak to start. Use **Smart Mode** for complex queries.
