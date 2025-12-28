@@ -2,7 +2,7 @@
   <img src="public/icon.png" alt="Julie Icon" width="120" height="120" />
   <h1>Julie</h1>
   <p>
-    <strong>Fully invisible AI assistant for an unfair advantage.</strong>
+    <strong>A screen-aware desktop AI assistant for an unfair productivity advantage.</strong>
   </p>
   <p>
     <a href="https://github.com/Luthiraa/julie/releases">
@@ -16,7 +16,11 @@
 
 ---
 
-**Julie** is a minimal, transparent AI assistant designed to integrate seamlessly into your workflow without getting in your way. It floats above your applications, ready to assist via voice or text, while remaining completely unobtrusive.
+Julie is a lightweight, transparent desktop AI assistant built to reduce context switching.
+It lives on top of your workspace, understands what’s on your screen, and responds via voice or text without forcing you to switch tabs, copy context, or break focus.
+
+It’s not autonomous or “agentic” - just a practical assistant designed to stay out of your way and keep you moving.
+Built in a weekend to see if it was possible, and open-sourced for anyone who wants to explore or extend it.
 
 ## 💾 Downloads
 
