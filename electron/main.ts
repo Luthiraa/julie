@@ -8,6 +8,10 @@ import 'dotenv/config'
 import Groq from 'groq-sdk'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+import { BrowserManager } from './browser.js'
+
+const browserManager = new BrowserManager();
+
 
 // Initialize Groq
 let currentApiKey = process.env.GROQ_API_KEY || '';
@@ -47,9 +51,18 @@ CORE RULES:
 AGENTIC CAPABILITIES:
 You have access to a terminal on the user's machine. When the user asks you to perform a task that requires file manipulation, system information, or executing commands, use the 'execute_terminal_command' tool.
 -   **DIRECT EXECUTION**: The command you provide becomes the argument to a 'exec' call.
--   **DO NOT** try to open a new terminal window. **NEVER** use 'start powershell', 'start cmd', 'cmd /k', or just 'powershell'.
--   **ALWAYS** provide the actual command to run (e.g., 'Get-ChildItem', 'npm install', 'echo hello').
+-   **GUI APPS**: If launching a GUI app (e.g., vscode, notepad), use 'Start-Process name' or 'start name' so it does not block the terminal.
+-   **DO NOT** try to open a new terminal window for simple tasks. **NEVER** use 'start powershell' just to run a command.
+-   **ALWAYS** provide the actual command to run (e.g., 'Get-ChildItem', 'npm install', 'code .').
+-   **ONE SHOT**: **NEVER** run the same command twice. If you see the output in the history, the task is DONE. Do not ask to run it again.
 -   **Output**: If you use a tool, your response will be processed by the system.
+
+BROWSER CAPABILITIES:
+You can control a web browser to perform tasks. Use the 'browser_action' tool.
+-   **Navigation**: 'navigate' to a URL.
+-   **Interaction**: 'click' elements, 'type' text, 'scroll'.
+-   **Reading**: 'read_page' to get the current page content and interactive elements.
+-   **General**: Always 'read_page' after navigation to understand where you are.
 `
 
 const TERMINAL_TOOL_DEF: any = {
@@ -66,6 +79,30 @@ const TERMINAL_TOOL_DEF: any = {
                 }
             },
             required: ["command"]
+        }
+    }
+};
+
+const BROWSER_TOOL_DEF: any = {
+    type: "function",
+    function: {
+        name: "browser_action",
+        description: "Control a web browser to navigate, click, type, or read page content.",
+        parameters: {
+            type: "object",
+            properties: {
+                action: {
+                    type: "string",
+                    enum: ["launch", "navigate", "click", "type", "scroll", "read_page", "get_url", "execute_script"],
+                    description: "The action to perform."
+                },
+                url: { type: "string", description: "URL for 'navigate' action." },
+                selector: { type: "string", description: "CSS selector for 'click' or 'type' action." },
+                text: { type: "string", description: "Text to type for 'type' action." },
+                direction: { type: "string", enum: ["up", "down"], description: "Direction for 'scroll' action." },
+                script: { type: "string", description: "JavaScript code for 'execute_script' action." }
+            },
+            required: ["action"]
         }
     }
 };
@@ -197,7 +234,8 @@ async function askGroqWithFallback(messages: any[], model: string = "llama-3.3-7
 
         // RECOVERY: Handle 'tool_use_failed' where API rejects valid Llama 3 output
         // Error format often includes: error: { failed_generation: "<function=name {...}>" }
-        const failedGen = error?.error?.failed_generation || error?.failed_generation;
+        // Deeply nested: error.error.error.failed_generation (sometimes)
+        const failedGen = error?.error?.failed_generation || error?.failed_generation || error?.error?.error?.failed_generation;
 
         if (failedGen && typeof failedGen === 'string') {
             console.log("Attempting to parse failed generation:", failedGen);
@@ -206,6 +244,7 @@ async function askGroqWithFallback(messages: any[], model: string = "llama-3.3-7
             // Case 1: Standard <function=name>(args) (handled by Groq usually, but sometimes leaks)
             // Case 2: Malformed <function=name args</function> (seen in logs, missing closing >)
             // Case 3: <function=name>{args}</function>
+            // Case 4: <function=name={args}></function> (The bug we saw)
 
             // We just look for <function=NAME ...ARGS... </function> or >
             const matchRobust = failedGen.match(/<function=(\w+)\s*(.*?)(?:>|<\/function>)/s);
@@ -217,7 +256,12 @@ async function askGroqWithFallback(messages: any[], model: string = "llama-3.3-7
                 if (args.endsWith('</function')) {
                     args = args.replace('</function', '');
                 }
+
+                // Cleanup: sometimes args starts with '=' if model hallucinated format (e.g. <function=name={...}>)
                 args = args.trim();
+                while (args.startsWith('=')) {
+                    args = args.substring(1).trim();
+                }
 
                 console.log(`Recovered tool call: ${name} with args ${args}`);
                 return {
@@ -236,6 +280,7 @@ async function askGroqWithFallback(messages: any[], model: string = "llama-3.3-7
             type: 'content',
             content: `Error: ${error.message}`
         };
+
     }
 }
 
@@ -275,10 +320,45 @@ ipcMain.handle('ask-groq', async (_, args: any) => {
         ...(Array.isArray(messages) ? messages : [{ role: "user", content: String(messages) }])
     ];
 
-    const tools = isAgentic ? [TERMINAL_TOOL_DEF] : null;
+    const tools = isAgentic ? [TERMINAL_TOOL_DEF, BROWSER_TOOL_DEF] : null;
+
 
     return await askGroqWithFallback(fullMessages, model, 1, tools);
 })
+
+// Browser Action Handler
+ipcMain.handle('trigger-browser-action', async (_, args: any) => {
+    console.log(`Executing Browser Action: ${args.action}`);
+    try {
+        switch (args.action) {
+            case 'launch':
+                await browserManager.launch();
+                if (args.url) {
+                    return await browserManager.navigate(args.url);
+                }
+                return "Browser launched.";
+            case 'navigate':
+                return await browserManager.navigate(args.url);
+            case 'click':
+                return await browserManager.click(args.selector);
+            case 'type':
+                return await browserManager.type(args.selector, args.text);
+            case 'scroll':
+                return await browserManager.scroll(args.direction);
+            case 'read_page':
+                return await browserManager.readPage();
+            case 'get_url':
+                return await browserManager.getUrl();
+            case 'execute_script':
+                return await browserManager.executeScript(args.script);
+            default:
+                return "Error: Unknown browser action.";
+        }
+    } catch (error: any) {
+        console.error("Browser Action Error:", error);
+        return `Error executing browser action: ${error.message}`;
+    }
+});
 
 process.env.DIST = path.join(__dirname, '../dist')
 process.env.VITE_PUBLIC = app.isPackaged ? process.env.DIST : path.join(process.env.DIST, '../public')
