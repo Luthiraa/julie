@@ -15,17 +15,20 @@ import {
   Home,
   Zap,
   Monitor,
-  LayoutGrid
+  LayoutGrid,
+  Terminal,
+  Check,
+  Ban
 } from 'lucide-react'
 import './index.css'
 import './App.css'
 import { AudioRecorder } from './components/AudioRecorder'
 
-const scenarioOptions = ['Cluely for Sales (Roy)', 'Hardware Grants', 'Board Meetings']
+const scenarioOptions = ["Default"]
 const quickActions = [
   { label: 'Assist', icon: Sparkles },
-  { label: 'What should I say next?', icon: MessageSquare }, // Using MessageSquare as placeholder
-  { label: 'Follow-up questions', icon: MessageSquare },
+  { label: 'What should I say next?', icon: MessageSquare },
+  { label: 'Follow-up questions', icon: MessageSquare }, // Using MessageSquare as placeholder
   { label: 'Recap', icon: RefreshCw }
 ]
 
@@ -35,6 +38,21 @@ type VisionBlock =
   | { type: 'image_url'; image_url: { url: string } }
 type MessageContent = string | VisionBlock[]
 type ChatMessage = { role: Role; content: MessageContent }
+
+// Tool Types
+type ToolCall = {
+  id: string
+  function: {
+    name: string
+    arguments: string
+  }
+}
+
+type PendingCommand = {
+  id: string
+  command: string
+  originalArgs: any
+} | null
 
 function App() {
   const [input, setInput] = useState('')
@@ -55,6 +73,10 @@ function App() {
   const [isScreenshotMode, setIsScreenshotMode] = useState(false)
   const [isPrivacyMode, setIsPrivacyMode] = useState(false)
   const [isSmartMode, setIsSmartMode] = useState(false)
+
+  // Agentic Mode State
+  const [isAgenticMode, setIsAgenticMode] = useState(false)
+  const [pendingCommand, setPendingCommand] = useState<PendingCommand>(null)
 
   // Settings State
   const [showSettings, setShowSettings] = useState(false)
@@ -136,6 +158,7 @@ function App() {
     }
   }
 
+  // Core Submission Logic
   const handleSubmit = async (e?: React.FormEvent, overrideText?: string) => {
     if (e) e.preventDefault()
     const typedInput = overrideText ?? input
@@ -181,16 +204,103 @@ function App() {
         { role: 'user', content: finalUserContent }
       ]
 
-      const result = await window.ipcRenderer.invoke('ask-groq', { messages: apiMessages, isSmart: isSmartMode }) as string
-      setMessages(prev => [...prev, { role: 'assistant', content: result }])
+      await callAgent(apiMessages)
       setTranscriptHistory('')
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Something went wrong'
       setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${message}` }])
+      setIsLoading(false)
+    }
+  }
+
+  // Recursive Agent Caller
+  const callAgent = async (apiMessages: any[]) => {
+    setIsLoading(true)
+    try {
+      const response = await window.ipcRenderer.invoke('ask-groq', {
+        messages: apiMessages,
+        isSmart: isSmartMode,
+        isAgentic: isAgenticMode
+      })
+
+      if (typeof response === 'string') {
+        // Fallback or simple error
+        setMessages(prev => [...prev, { role: 'assistant', content: response }])
+      } else if (response.type === 'content') {
+        // Standard Text Response
+        setMessages(prev => [...prev, { role: 'assistant', content: response.content }])
+      } else if (response.type === 'tool_call') {
+        // Handle Tool Call
+        const { function: fn } = response
+        if (fn.name === 'execute_terminal_command') {
+          const args = JSON.parse(fn.arguments)
+          setPendingCommand({
+            id: response.id,
+            command: args.command,
+            originalArgs: apiMessages // Store history to continue later
+          })
+          // Do NOT clear loading state? OR split flow.
+          // We must stop loading to let user interact.
+        } else {
+          setMessages(prev => [...prev, { role: 'assistant', content: `Error: Unknown tool ${fn.name}` }])
+        }
+      }
+    } catch (err: any) {
+      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.message}` }])
     } finally {
       setIsLoading(false)
     }
   }
+
+  const handleApproveCommand = async () => {
+    if (!pendingCommand) return
+    setIsLoading(true)
+    const { command, originalArgs } = pendingCommand
+    setPendingCommand(null)
+
+    // Add interim "thought" to history (visual only or functional?)
+    // We update the functional history for the next call
+    const intermediateMessages = [
+      ...originalArgs,
+      { role: 'assistant', content: `I will run the command: \`${command}\`` }
+    ]
+    setMessages(prev => [...prev, { role: 'assistant', content: `Running: \`${command}\`...` }])
+
+    try {
+      const output = await window.ipcRenderer.invoke('run-command', command)
+
+      const nextMessages = [
+        ...intermediateMessages,
+        { role: 'user', content: `[SYSTEM: Command successfully executed. Output below.]\n\n${output}\n\n[SYSTEM: The command ran successfully. DO NOT run it again. Summarize the result for the user as your final answer.]` }
+      ]
+
+      // Show output in chat so user sees the result (e.g. cowsay)
+      setMessages(prev => [...prev, { role: 'assistant', content: `Output:\n\`\`\`\n${output}\n\`\`\`` }])
+
+      // Loop back to agent
+      await callAgent(nextMessages)
+
+    } catch (err: any) {
+      setMessages(prev => [...prev, { role: 'assistant', content: `Execution Error: ${err.message}` }])
+      setIsLoading(false)
+    }
+  }
+
+  const handleDenyCommand = async () => {
+    if (!pendingCommand) return
+    const { command, originalArgs } = pendingCommand
+    setPendingCommand(null)
+
+    const nextMessages = [
+      ...originalArgs,
+      { role: 'assistant', content: `I wanted to run: \`${command}\`` },
+      { role: 'user', content: "I denied that command. Do not run it. Ask me for something else or stop." }
+    ]
+
+    setMessages(prev => [...prev, { role: 'assistant', content: `(Command \`${command}\` denied by user)` }])
+    await callAgent(nextMessages)
+  }
+
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -275,6 +385,28 @@ function App() {
             <div className="message-bubble assistant pulse">Composing…</div>
           </div>
         )}
+
+        {/* Pending Command Approval UI */}
+        {pendingCommand && (
+          <div className="command-approval-card">
+            <div className="approval-header">
+              <Terminal size={16} className="text-purple-400" />
+              <span>Julie wants to run a command:</span>
+            </div>
+            <div className="approval-code">
+              <code>{pendingCommand.command}</code>
+            </div>
+            <div className="approval-actions">
+              <button className="approval-btn deny" onClick={handleDenyCommand}>
+                <Ban size={14} /> Deny
+              </button>
+              <button className="approval-btn approve" onClick={handleApproveCommand}>
+                <Check size={14} /> Approve & Run
+              </button>
+            </div>
+          </div>
+        )}
+
         <div ref={messagesEndRef} />
       </div>
     )
@@ -361,7 +493,7 @@ function App() {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask, ⌘ ↵ to start typing"
+            placeholder={isAgenticMode ? "Ask Julie to do something on your PC..." : "Ask, ⌘ ↵ to start typing"}
             rows={1}
           />
 
@@ -381,6 +513,15 @@ function App() {
                 <Zap size={14} fill={isSmartMode ? "currentColor" : "none"} />
                 Smart
               </button>
+              <button
+                className={`pill-btn ${isAgenticMode ? 'purple' : 'ghost'}`}
+                onClick={() => setIsAgenticMode(!isAgenticMode)}
+                title="Allow Julie to run terminal commands"
+              >
+                <Terminal size={14} />
+                Agentic
+              </button>
+
               <div className="footer-divider" />
               <div className="scenario-dropdown">
                 <span>{scenario}</span>

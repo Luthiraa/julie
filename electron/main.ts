@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import { app, BrowserWindow, ipcMain, globalShortcut, screen, desktopCapturer } from 'electron'
+import { exec } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import 'dotenv/config'
@@ -43,11 +44,31 @@ CORE RULES:
 3.  **Context Aware**: You have access to the conversation history. Use it to answer follow-up questions (e.g., "times 5" refers to the previous result).
 4.  **No Meta-Talk**: Never explain your reasoning process unless explicitly asked. Never output "Expression Analysis" or similar headers.
 
-FORMATTING:
-- Use Markdown.
-- Use LaTeX for math: $E=mc^2$.
-- No headers (#).
+AGENTIC CAPABILITIES:
+You have access to a terminal on the user's machine. When the user asks you to perform a task that requires file manipulation, system information, or executing commands, use the 'execute_terminal_command' tool.
+-   **DIRECT EXECUTION**: The command you provide becomes the argument to a 'exec' call.
+-   **DO NOT** try to open a new terminal window. **NEVER** use 'start powershell', 'start cmd', 'cmd /k', or just 'powershell'.
+-   **ALWAYS** provide the actual command to run (e.g., 'Get-ChildItem', 'npm install', 'echo hello').
+-   **Output**: If you use a tool, your response will be processed by the system.
 `
+
+const TERMINAL_TOOL_DEF: any = {
+    type: "function",
+    function: {
+        name: "execute_terminal_command",
+        description: "Execute a terminal command on the user's machine via PowerShell. Do NOT launch interactive shells (no 'start', 'code .', etc). Just run the utility directly.",
+        parameters: {
+            type: "object",
+            properties: {
+                command: {
+                    type: "string",
+                    description: "The PowerShell command to execute (e.g., 'Get-Process', 'npm install package', 'cat file.txt')."
+                }
+            },
+            required: ["command"]
+        }
+    }
+};
 
 ipcMain.handle('set-api-key', (_, key: string) => {
     console.log("Received request to update API Key via IPC.");
@@ -111,44 +132,132 @@ ipcMain.handle('close-window', () => {
     }
 });
 
-async function askGroqWithFallback(messages: any[], model: string = "llama-3.3-70b-versatile", retries = 1): Promise<string> {
+// Execute Command Handler
+ipcMain.handle('run-command', async (_, command: string) => {
+    console.log(`Executing Agentic Command: ${command}`);
+    return new Promise((resolve) => {
+        // Force PowerShell execution
+        const psCommand = `powershell.exe -NoProfile -NonInteractive -Command "${command.replace(/"/g, '\\"')}"`;
+
+        exec(psCommand, { cwd: os.homedir() }, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`Exec Error: ${error.message}`);
+                resolve(`Error: ${error.message}\nStderr: ${stderr}`);
+                return;
+            }
+            const output = stdout.trim() || stderr.trim() || "Success (no output).";
+            resolve(output);
+        });
+    });
+});
+
+async function askGroqWithFallback(messages: any[], model: string = "llama-3.3-70b-versatile", retries = 1, tools: any[] | null = null): Promise<any> {
     try {
-        const completion = await groq.chat.completions.create({
+        const params: any = {
             messages,
             model,
-        });
-        return completion.choices[0]?.message?.content || "No response.";
+        };
+
+        if (tools && tools.length > 0) {
+            params.tools = tools;
+            params.tool_choice = "auto";
+        }
+
+        const completion = await groq.chat.completions.create(params);
+
+        const choice = completion.choices[0];
+        const message = choice?.message;
+
+        // Check for tool calls first
+        if (message?.tool_calls && message.tool_calls.length > 0) {
+            const toolCall = message.tool_calls[0];
+            return {
+                type: 'tool_call',
+                id: toolCall.id,
+                function: {
+                    name: toolCall.function.name,
+                    arguments: toolCall.function.arguments
+                }
+            };
+        }
+
+        return {
+            type: 'content',
+            content: message?.content || "No response."
+        };
+
     } catch (error: any) {
         console.error(`Groq Error (${model}):`, error);
 
         // Check for Rate Limit (429)
         if (error?.status === 429 && retries > 0) {
             console.log("Rate limit hit. Switching to fallback model: llama-3.1-8b-instant");
-            return askGroqWithFallback(messages, "llama-3.1-8b-instant", retries - 1);
+            return askGroqWithFallback(messages, "llama-3.1-8b-instant", retries - 1, tools);
         }
 
-        return `Error: ${error.message}`;
+        // RECOVERY: Handle 'tool_use_failed' where API rejects valid Llama 3 output
+        // Error format often includes: error: { failed_generation: "<function=name {...}>" }
+        const failedGen = error?.error?.failed_generation || error?.failed_generation;
+
+        if (failedGen && typeof failedGen === 'string') {
+            console.log("Attempting to parse failed generation:", failedGen);
+
+            // Robust Regex for various Llama 3 failure modes
+            // Case 1: Standard <function=name>(args) (handled by Groq usually, but sometimes leaks)
+            // Case 2: Malformed <function=name args</function> (seen in logs, missing closing >)
+            // Case 3: <function=name>{args}</function>
+
+            // We just look for <function=NAME ...ARGS... </function> or >
+            const matchRobust = failedGen.match(/<function=(\w+)\s*(.*?)(?:>|<\/function>)/s);
+
+            if (matchRobust) {
+                const name = matchRobust[1];
+                let args = matchRobust[2];
+                // Cleanup args if they have trailing </function
+                if (args.endsWith('</function')) {
+                    args = args.replace('</function', '');
+                }
+                args = args.trim();
+
+                console.log(`Recovered tool call: ${name} with args ${args}`);
+                return {
+                    type: 'tool_call',
+                    id: `call_recovered_${Date.now()}`,
+                    function: {
+                        name: name,
+                        arguments: args
+                    }
+                };
+            }
+        }
+
+        // Return structured error
+        return {
+            type: 'content',
+            content: `Error: ${error.message}`
+        };
     }
 }
 
 ipcMain.handle('ask-groq', async (_, args: any) => {
     if (!currentApiKey) {
-        return "Error: API Key not configured. Please add one in Settings.";
+        return { type: 'content', content: "Error: API Key not configured. Please add one in Settings." };
     }
 
-    // Handle both old (array only) and new ({messages, isSmart}) signatures
+    // Handle both old (array only) and new ({messages, isSmart, isAgentic}) signatures
     let messages: any[];
     let isSmart = false;
+    let isAgentic = false;
 
     if (Array.isArray(args)) {
         messages = args;
     } else {
         messages = args.messages;
         isSmart = !!args.isSmart;
+        isAgentic = !!args.isAgentic;
     }
 
     // Determine if we need Vision model
-    // Check if the last message (user) has content that is an array (which implies image)
     const lastMsg = messages[messages.length - 1];
     const hasImage = Array.isArray(lastMsg?.content);
 
@@ -161,14 +270,14 @@ ipcMain.handle('ask-groq', async (_, args: any) => {
         console.log("Using Smart Model: llama-3.3-70b-versatile");
     }
 
-    // Prepend system prompt if not already present
-    // We construct the full message chain here to ensure system prompt is always first
     const fullMessages = [
         { role: "system", content: JULIE_SYSTEM_PROMPT },
         ...(Array.isArray(messages) ? messages : [{ role: "user", content: String(messages) }])
     ];
 
-    return await askGroqWithFallback(fullMessages, model);
+    const tools = isAgentic ? [TERMINAL_TOOL_DEF] : null;
+
+    return await askGroqWithFallback(fullMessages, model, 1, tools);
 })
 
 process.env.DIST = path.join(__dirname, '../dist')
