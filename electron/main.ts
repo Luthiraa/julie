@@ -63,6 +63,12 @@ You can control a web browser to perform tasks. Use the 'browser_action' tool.
 -   **Interaction**: 'click' elements, 'type' text, 'scroll'.
 -   **Reading**: 'read_page' to get the current page content and interactive elements.
 -   **General**: Always 'read_page' after navigation to understand where you are.
+
+KEYBOARD CAPABILITIES:
+You can directly type text into the user's active window using the 'keyboard_action' tool.
+-   **Use Case**: When the user explicitly asks you to "write" or "type" the solution/text into their current view (e.g., "write this code", "type the answer").
+-   **Action**: Use 'type' to type long text. Use 'press_key' for special keys (not fully supported yet, stick to typing).
+-   **Important**: This tool types BLINDLY into whatever window was active before they interacted with you. Ensure you have the text ready.
 `
 
 const TERMINAL_TOOL_DEF: any = {
@@ -103,6 +109,26 @@ const BROWSER_TOOL_DEF: any = {
                 script: { type: "string", description: "JavaScript code for 'execute_script' action." }
             },
             required: ["action"]
+        }
+    }
+};
+
+const KEYBOARD_TOOL_DEF: any = {
+    type: "function",
+    function: {
+        name: "keyboard_action",
+        description: "Type text into the ACTIVE window. Use this when the user wants you to 'write' code or text into their current editor or browser. WARNING: This types into the currently focused window, so the user must have their cursor ready.",
+        parameters: {
+            type: "object",
+            properties: {
+                text: { type: "string", description: "The text to type." },
+                action: {
+                    type: "string",
+                    enum: ["type"],
+                    description: "The action to perform."
+                }
+            },
+            required: ["text"]
         }
     }
 };
@@ -218,6 +244,58 @@ async function askGroqWithFallback(messages: any[], model: string = "llama-3.3-7
             };
         }
 
+        // HALLUCINATION FIX: Check if content IS a tool call (JSON string)
+        // Some models (Llama 4 Scout) might output the tool call as raw text, sometimes wrapped in markdown
+        if (message?.content) {
+            const content = message.content;
+            const startSearchIndex = content.indexOf('{');
+
+            if (startSearchIndex !== -1) {
+                // Heuristic: Count braces to find the end of the JSON object
+                let braceCount = 0;
+                let startIndex = startSearchIndex;
+                let endIndex = -1;
+
+                for (let i = startIndex; i < content.length; i++) {
+                    if (content[i] === '{') {
+                        braceCount++;
+                    } else if (content[i] === '}') {
+                        braceCount--;
+                        if (braceCount === 0) {
+                            endIndex = i + 1;
+                            break;
+                        }
+                    }
+                }
+
+                if (endIndex !== -1) {
+                    const jsonString = content.substring(startIndex, endIndex);
+                    try {
+                        // Attempt to strict parse first
+                        const json = JSON.parse(jsonString);
+
+                        if (json.name && json.parameters) {
+                            console.log("Recovered tool call from text content:", json.name);
+                            return {
+                                type: 'tool_call',
+                                id: `call_hallucinated_${Date.now()}`,
+                                function: {
+                                    name: json.name,
+                                    arguments: typeof json.parameters === 'string' ? json.parameters : JSON.stringify(json.parameters)
+                                }
+                            };
+                        }
+                    } catch (e) {
+                        console.log("Failed to parse extracted JSON:", e);
+                        console.log("Extracted string was:", jsonString);
+
+                        // Simple fallback for unescaped content if possible? 
+                        // For now, just logging helps debugging.
+                    }
+                }
+            }
+        }
+
         return {
             type: 'content',
             content: message?.content || "No response."
@@ -303,12 +381,15 @@ ipcMain.handle('ask-groq', async (_, args: any) => {
     }
 
     // Determine if we need Vision model
-    const lastMsg = messages[messages.length - 1];
-    const hasImage = Array.isArray(lastMsg?.content);
+    // Check if ANY message in the history contains an image (array content)
+    const hasImage = messages.some(m => Array.isArray(m.content));
 
     let model = "llama-3.3-70b-versatile"; // Default
 
     if (hasImage) {
+        // Use Vision model for the entire session if context involves images
+        // llama-3.2 vision models are decommissioned.
+        // Using Llama 4 Scout (current supported preview).
         model = "meta-llama/llama-4-scout-17b-16e-instruct";
     } else if (isSmart) {
         model = "llama-3.3-70b-versatile"; // Fallback to best available Llama model
@@ -320,7 +401,7 @@ ipcMain.handle('ask-groq', async (_, args: any) => {
         ...(Array.isArray(messages) ? messages : [{ role: "user", content: String(messages) }])
     ];
 
-    const tools = isAgentic ? [TERMINAL_TOOL_DEF, BROWSER_TOOL_DEF] : null;
+    const tools = isAgentic ? [TERMINAL_TOOL_DEF, BROWSER_TOOL_DEF, KEYBOARD_TOOL_DEF] : null;
 
 
     return await askGroqWithFallback(fullMessages, model, 1, tools);
@@ -358,6 +439,133 @@ ipcMain.handle('trigger-browser-action', async (_, args: any) => {
         console.error("Browser Action Error:", error);
         return `Error executing browser action: ${error.message}`;
     }
+});
+
+// Get Running Apps Handler
+ipcMain.handle('get-running-apps', async () => {
+    return new Promise((resolve) => {
+        const script = `
+            tell application "System Events"
+                set appNames to name of every process whose background only is false
+                return appNames
+            end tell
+        `;
+        exec(`osascript -e '${script}'`, (error, stdout) => {
+            if (error) {
+                console.error("Error getting apps:", error);
+                resolve([]);
+            } else {
+                // Determine format: "App1, App2, App3"
+                const list = stdout.trim().split(',').map(s => s.trim());
+                resolve(list);
+            }
+        });
+    });
+});
+
+// Keyboard Action Handler
+ipcMain.handle('trigger-keyboard-action', async (_, args: any) => {
+    const action = args.action || 'type'; // Default to 'type'
+    console.log(`Executing Keyboard Action: ${action} Target: ${args.targetApp || 'Auto'}`);
+
+    // If we have a specific target, we don't need to hide/blur as aggressively
+    // because we will explicitly activate the target.
+    // However, hiding Julie is still good for visual cleanliness.
+
+    if (win) {
+        win.blur();
+        win.hide();
+    }
+
+    // Slight delay to allow hide animation
+    await new Promise(r => setTimeout(r, 500));
+
+    return new Promise((resolve) => {
+        if (action === 'type' && args.text) {
+            // For clipboard methodology, we don't need to escape " as heavily for the keystroke command,
+            // but we do need to escape it for the AppleScript string: set the clipboard to "..."
+            // We need to escape backslashes and double quotes.
+            const safeText = args.text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+            const targetApp = args.targetApp ? args.targetApp.replace(/"/g, '\\"') : null;
+
+            // AppleScript: Use Clipboard + Paste (Cmd+V) logic
+            // 1. Save old clipboard (try/catch)
+            // 2. Set new clipboard
+            // 3. Activate target
+            // 4. Paste (Cmd+V)
+            // 5. Restore clipboard (optional/delay)
+
+            let script = `
+                set originalClipboard to ""
+                try
+                    set originalClipboard to the clipboard
+                end try
+                
+                set the clipboard to "${safeText}"
+             `;
+
+            if (targetApp) {
+                // TARGETED MODE
+                script += `
+                    tell application "${targetApp}" to activate
+                    delay 0.5
+                    tell application "System Events"
+                        keystroke "v" using command down
+                    end tell
+                    delay 0.5
+                    try
+                        set the clipboard to originalClipboard
+                    end try
+                    return "${targetApp}"
+                 `;
+            } else {
+                // AUTO MODE
+                script += `
+                    tell application "System Events"
+                        -- Switch focus by hiding Julie
+                        try
+                            set visible of process "Electron" to false
+                        end try
+                        try
+                            set visible of process "Julie" to false
+                        end try
+                        
+                        delay 0.5
+                        
+                        set frontApp to name of first application process whose frontmost is true
+                        keystroke "v" using command down
+                        return frontApp
+                    end tell
+                    delay 0.5
+                    try
+                        set the clipboard to originalClipboard
+                    end try
+                 `;
+            }
+
+            exec(`osascript -e '${script}'`, (error, stdout, stderr) => {
+                // Restore window after typing
+                if (win) {
+                    win.show();
+                }
+
+                if (error) {
+                    console.error("Keyboard Error:", error);
+                    if (error.message.includes("1002")) {
+                        resolve("Error: Permission denied. Please allow your Terminal (or VSCode) to control your computer in System Settings > Privacy & Security > Accessibility.");
+                    } else {
+                        resolve(`Error (potentially pasted): ${error.message}`);
+                    }
+                } else {
+                    const appName = stdout.trim();
+                    resolve(`Successfully pasted into ${appName}.`);
+                }
+            });
+        } else {
+            if (win) win.show();
+            resolve("Error: Invalid keyboard arguments.");
+        }
+    });
 });
 
 process.env.DIST = path.join(__dirname, '../dist')
