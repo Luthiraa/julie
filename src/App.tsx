@@ -315,11 +315,12 @@ function App() {
       // Show output in chat
       setMessages(prev => [...prev, { role: 'assistant', content: `Output:\n\`\`\`\n${output}\n\`\`\`` }])
 
-      // Check if task is done (Terminal only for now)
+      // Check if task is done
       const isStartCommand = command?.trim().toLowerCase().startsWith('start');
       const isGenericSuccess = output.trim().includes('Success (no output)');
+      const isKeyboardSuccess = toolName === 'keyboard_action' && output.includes('Successfully'); // formatted "Successfully typed/pasted..."
 
-      if (isStartCommand || isGenericSuccess) {
+      if (isStartCommand || isGenericSuccess || isKeyboardSuccess) {
         setMessages(prev => [...prev, { role: 'assistant', content: "Task completed successfully." }]);
         setIsLoading(false);
         return; // Stop the loop here

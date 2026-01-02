@@ -245,9 +245,40 @@ async function askGroqWithFallback(messages: any[], model: string = "llama-3.3-7
         }
 
         // HALLUCINATION FIX: Check if content IS a tool call (JSON string)
-        // Some models (Llama 4 Scout) might output the tool call as raw text, sometimes wrapped in markdown
         if (message?.content) {
             const content = message.content;
+
+            // PATTERN 1: <function=name>{json}</function>  (New Llama 4 behavior?)
+            // Regex to capture name and the JSON content inside
+            const funcMatch = content.match(/<function=(\w+)>(.*?)<\/function>/s) || content.match(/<function=(\w+)>(.*)/s);
+
+            if (funcMatch) {
+                const toolName = funcMatch[1];
+                let jsonContent = funcMatch[2].trim();
+
+                // Sometimes it starts with a colon e.g. ":{...}"
+                if (jsonContent.startsWith(':')) {
+                    jsonContent = jsonContent.substring(1).trim();
+                }
+
+                try {
+                    // Try parsing
+                    const json = JSON.parse(jsonContent);
+                    console.log(`Recovered <function> style tool call: ${toolName}`);
+                    return {
+                        type: 'tool_call',
+                        id: `call_xml_${Date.now()}`,
+                        function: {
+                            name: toolName,
+                            arguments: JSON.stringify(json)
+                        }
+                    };
+                } catch (e) {
+                    console.log("Failed to parse <function> JSON:", e);
+                }
+            }
+
+            // PATTERN 2: Text containing a JSON block { "name": ... }
             const startSearchIndex = content.indexOf('{');
 
             if (startSearchIndex !== -1) {
@@ -271,14 +302,13 @@ async function askGroqWithFallback(messages: any[], model: string = "llama-3.3-7
                 if (endIndex !== -1) {
                     const jsonString = content.substring(startIndex, endIndex);
                     try {
-                        // Attempt to strict parse first
                         const json = JSON.parse(jsonString);
 
                         if (json.name && json.parameters) {
-                            console.log("Recovered tool call from text content:", json.name);
+                            console.log("Recovered standard JSON tool call:", json.name);
                             return {
                                 type: 'tool_call',
-                                id: `call_hallucinated_${Date.now()}`,
+                                id: `call_json_${Date.now()}`,
                                 function: {
                                     name: json.name,
                                     arguments: typeof json.parameters === 'string' ? json.parameters : JSON.stringify(json.parameters)
@@ -286,11 +316,7 @@ async function askGroqWithFallback(messages: any[], model: string = "llama-3.3-7
                             };
                         }
                     } catch (e) {
-                        console.log("Failed to parse extracted JSON:", e);
-                        console.log("Extracted string was:", jsonString);
-
-                        // Simple fallback for unescaped content if possible? 
-                        // For now, just logging helps debugging.
+                        // ignore
                     }
                 }
             }
@@ -481,48 +507,55 @@ ipcMain.handle('trigger-keyboard-action', async (_, args: any) => {
     await new Promise(r => setTimeout(r, 500));
 
     return new Promise((resolve) => {
+        const action = args.action || 'type';
+
         if (action === 'type' && args.text) {
-            // For clipboard methodology, we don't need to escape " as heavily for the keystroke command,
-            // but we do need to escape it for the AppleScript string: set the clipboard to "..."
-            // We need to escape backslashes and double quotes.
-            const safeText = args.text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
             const targetApp = args.targetApp ? args.targetApp.replace(/"/g, '\\"') : null;
 
-            // AppleScript: Use Clipboard + Paste (Cmd+V) logic
-            // 1. Save old clipboard (try/catch)
-            // 2. Set new clipboard
-            // 3. Activate target
-            // 4. Paste (Cmd+V)
-            // 5. Restore clipboard (optional/delay)
+            // "True Typewriter" Logic:
+            // 1. Split text into lines.
+            // 2. Keystroke each line.
+            // 3. Send "Enter" (key code 36) for newlines.
+            // This gives the visual effect of typing while preserving structure better than a blob.
 
-            let script = `
-                set originalClipboard to ""
-                try
-                    set originalClipboard to the clipboard
-                end try
-                
-                set the clipboard to "${safeText}"
-             `;
+            const lines = args.text.split('\n');
+            let scriptCommands = "";
+
+            // Helper to escape for AppleScript string
+            const escape = (str: string) => str.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+            for (const line of lines) {
+                if (line.length > 0) {
+                    scriptCommands += `keystroke "${escape(line)}"\n`;
+                    scriptCommands += `delay 0.05\n`; // Tiny delay for visual effect
+                }
+                // Only add Enter if not the very last line (optional, but standard usually implies yes)
+                // Actually, split removes delimiters, so we need to add them back.
+                scriptCommands += `key code 36\n`;
+                scriptCommands += `delay 0.05\n`;
+            }
+
+            // Remove the last Enter if strictly needed? 
+            // Logic: split("a\nb") -> ["a", "b"]. We add enter after "a" and "b". 
+            // Usually one extra enter is fine or even desired.
+
+            let script = "";
 
             if (targetApp) {
                 // TARGETED MODE
-                script += `
+                script = `
                     tell application "${targetApp}" to activate
                     delay 0.5
                     tell application "System Events"
-                        keystroke "v" using command down
+                        ${scriptCommands}
                     end tell
-                    delay 0.5
-                    try
-                        set the clipboard to originalClipboard
-                    end try
                     return "${targetApp}"
                  `;
             } else {
                 // AUTO MODE
-                script += `
+                script = `
                     tell application "System Events"
-                        -- Switch focus by hiding Julie
+                        -- Switch focus logic
                         try
                             set visible of process "Electron" to false
                         end try
@@ -533,13 +566,9 @@ ipcMain.handle('trigger-keyboard-action', async (_, args: any) => {
                         delay 0.5
                         
                         set frontApp to name of first application process whose frontmost is true
-                        keystroke "v" using command down
+                        ${scriptCommands}
                         return frontApp
                     end tell
-                    delay 0.5
-                    try
-                        set the clipboard to originalClipboard
-                    end try
                  `;
             }
 
@@ -552,13 +581,15 @@ ipcMain.handle('trigger-keyboard-action', async (_, args: any) => {
                 if (error) {
                     console.error("Keyboard Error:", error);
                     if (error.message.includes("1002")) {
-                        resolve("Error: Permission denied. Please allow your Terminal (or VSCode) to control your computer in System Settings > Privacy & Security > Accessibility.");
+                        resolve("Error: Permission denied. Please allow your Terminal to control your computer.");
                     } else {
-                        resolve(`Error (potentially pasted): ${error.message}`);
+                        // Truncate long error messages
+                        const msg = error.message.length > 200 ? error.message.substring(0, 200) + "..." : error.message;
+                        resolve(`Error (typing): ${msg}`);
                     }
                 } else {
                     const appName = stdout.trim();
-                    resolve(`Successfully pasted into ${appName}.`);
+                    resolve(`Successfully typed into ${appName}.`);
                 }
             });
         } else {
