@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="public/icon.png" alt="Julie Icon" width="120" height="120" />
+  <img src="public/newIcon.png" alt="Julie Icon" width="120" height="120" />
   <h1>Julie</h1>
   <p>
     <strong>A screen-aware desktop AI assistant for an unfair productivity advantage.</strong>
