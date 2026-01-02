@@ -92,3 +92,93 @@ textarea,
 select {
   font-family: inherit;
 }
+
+/* Approval Buttons */
+.approval-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.approval-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+
+.approval-btn.deny {
+  background: rgba(255, 69, 58, 0.1);
+  color: #ff453a;
+  border-color: rgba(255, 69, 58, 0.2);
+}
+
+.approval-btn.deny:hover {
+  background: rgba(255, 69, 58, 0.2);
+}
+
+.approval-btn.approve {
+  background: #0a84ff;
+  color: white;
+}
+
+.approval-btn.approve:hover {
+  background: #007aff;
+  box-shadow: 0 2px 8px rgba(10, 132, 255, 0.3);
+}
+
+/* Target Picker (Select) */
+.target-picker {
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.target-picker label {
+  font-size: 12px;
+  color: #888;
+  font-weight: 500;
+}
+
+.target-picker select {
+  flex: 1;
+  appearance: none;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: #eef6ff;
+  outline: none;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 14px;
+}
+
+.target-picker select:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.target-picker select:focus {
+  border-color: #0a84ff;
+}
+
+/* Smart Mode Active State */
+button.active-smart {
+  color: #ffd60a !important; /* Yellow */
+  border-color: rgba(255, 214, 10, 0.3) !important;
+  background: rgba(255, 214, 10, 0.1) !important;
+  box-shadow: 0 0 10px rgba(255, 214, 10, 0.1);
+}

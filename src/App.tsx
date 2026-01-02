@@ -147,6 +147,10 @@ function App() {
     console.log(newState ? 'use screen enabled' : 'use screen disabled')
   }
 
+  const toggleSmartMode = () => {
+    setIsSmartMode(!isSmartMode)
+  }
+
   const togglePrivacyMode = async () => {
     const newMode = !isPrivacyMode
     setIsPrivacyMode(newMode)
@@ -260,6 +264,14 @@ function App() {
             toolArgs: args,
             originalArgs: apiMessages
           })
+        } else if (fn.name === 'computer_action') {
+          const args = JSON.parse(fn.arguments)
+          setPendingCommand({
+            id: response.id,
+            toolName: fn.name,
+            toolArgs: args,
+            originalArgs: apiMessages
+          })
         } else {
 
           setMessages(prev => [...prev, { role: 'assistant', content: `Error: Unknown tool ${fn.name}` }])
@@ -305,6 +317,8 @@ function App() {
         output = await window.ipcRenderer.invoke('trigger-browser-action', finalArgs)
       } else if (toolName === 'keyboard_action') {
         output = await window.ipcRenderer.invoke('trigger-keyboard-action', finalArgs)
+      } else if (toolName === 'computer_action') {
+        output = await window.ipcRenderer.invoke('trigger-computer-action', finalArgs)
       }
 
       const nextMessages = [
@@ -580,10 +594,10 @@ function App() {
                 Use Screen
               </button>
               <button
-                className={`pill-btn ${isSmartMode ? 'blue' : 'ghost'}`}
-                onClick={() => setIsSmartMode(!isSmartMode)}
+                className={`pill-btn ${isSmartMode ? 'active-smart' : ''}`}
+                onClick={toggleSmartMode}
               >
-                <Zap size={14} fill={isSmartMode ? "currentColor" : "none"} />
+                <Zap size={14} />
                 Smart
               </button>
               <button

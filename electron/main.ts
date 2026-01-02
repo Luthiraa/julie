@@ -13,7 +13,69 @@ import { BrowserManager } from './browser.js'
 const browserManager = new BrowserManager();
 
 
-// Initialize Groq
+import { ComputerAction } from './computer.js';
+
+// ... (existing code)
+
+// Computer Action Handler
+ipcMain.handle('trigger-computer-action', async (_, args: any) => {
+    console.log(`Executing Computer Action: ${args.action}`);
+    try {
+        let result;
+        const [x, y] = args.coordinate || [0, 0];
+
+        switch (args.action) {
+            case 'mouse_move':
+                await ComputerAction.mouseMove(x, y);
+                result = `Moved mouse to ${x}, ${y}`;
+                break;
+            case 'left_click':
+                await ComputerAction.leftClick(x, y);
+                result = `Left clicked at ${x}, ${y}`;
+                break;
+            case 'right_click':
+                await ComputerAction.rightClick(x, y);
+                result = `Right clicked at ${x}, ${y}`;
+                break;
+            case 'double_click':
+                await ComputerAction.doubleClick(x, y);
+                result = `Double clicked at ${x}, ${y}`;
+                break;
+            case 'drag':
+                // Expect coordinate to contain [startX, startY, endX, endY] ?? 
+                // Actually schema says [x,y]. Drag needs 2 points.
+                // Let's assume start is current pos? Or parse text?
+                // For now, let's just say drag requires coordinate=[endX, endY] and assumes current start?
+                // OR we extend schema.
+                // Let's implement simpler: [startX, startY] -> [endX, endY]
+                // But model usually sends one coord.
+                // Let's assume coordinate is DESTINATION, and start is implicit current.
+                const current = await ComputerAction.getCursorPosition();
+                await ComputerAction.drag(current.x, current.y, x, y);
+                result = `Dragged from ${current.x},${current.y} to ${x},${y}`;
+                break;
+            case 'scroll':
+                const amount = parseInt(args.text || "-5");
+                await ComputerAction.scroll(x, y, amount); // Scroll at current location or specified?
+                result = `Scrolled by ${amount}`;
+                break;
+            case 'get_cursor_position':
+                const pos = await ComputerAction.getCursorPosition();
+                result = JSON.stringify(pos);
+                break;
+            case 'get_screen_size':
+                const size = await ComputerAction.getScreenSize();
+                result = JSON.stringify(size);
+                break;
+            default:
+                result = "Unknown computer action";
+        }
+        return result;
+    } catch (error: any) {
+        console.error("Computer Action Error:", error);
+        return `Error: ${error.message}`;
+    }
+});
 let currentApiKey = process.env.GROQ_API_KEY || '';
 if (currentApiKey && !currentApiKey.startsWith('gsk_')) {
     console.error("Warning: GROQ_API_KEY environment variable does not start with 'gsk_'. Ignoring it.");
@@ -199,10 +261,20 @@ ipcMain.handle('close-window', () => {
 ipcMain.handle('run-command', async (_, command: string) => {
     console.log(`Executing Agentic Command: ${command}`);
     return new Promise((resolve) => {
-        // Force PowerShell execution
-        const psCommand = `powershell.exe -NoProfile -NonInteractive -Command "${command.replace(/"/g, '\\"')}"`;
+        let finalCommand = command;
+        let execOptions: any = { cwd: os.homedir() };
 
-        exec(psCommand, { cwd: os.homedir() }, (error, stdout, stderr) => {
+        // Platform specific shell wrapping
+        if (process.platform === 'win32') {
+            // Force PowerShell on Windows
+            finalCommand = `powershell.exe -NoProfile -NonInteractive -Command "${command.replace(/"/g, '\\"')}"`;
+        } else {
+            // Use zsh/bash on macOS/Linux
+            // We generally just exec() but setting shell to /bin/zsh is safer
+            execOptions.shell = '/bin/zsh';
+        }
+
+        exec(finalCommand, execOptions, (error, stdout, stderr) => {
             if (error) {
                 console.error(`Exec Error: ${error.message}`);
                 resolve(`Error: ${error.message}\nStderr: ${stderr}`);
@@ -250,16 +322,23 @@ async function askGroqWithFallback(messages: any[], model: string = "llama-3.3-7
 
             // PATTERN 1: <function=name>{json}</function>  (New Llama 4 behavior?)
             // Regex to capture name and the JSON content inside
-            const funcMatch = content.match(/<function=(\w+)>(.*?)<\/function>/s) || content.match(/<function=(\w+)>(.*)/s);
+            // Handling variations like <function=name":{...}> or <function=name>
+
+            // Try to match the opening tag somewhat loosely
+            const funcMatch = content.match(/<function=([^>]+)>(.*?)<\/function>/s) || content.match(/<function=([^>]+)>(.*)/s);
 
             if (funcMatch) {
-                const toolName = funcMatch[1];
+                let toolName = funcMatch[1].trim();
                 let jsonContent = funcMatch[2].trim();
 
-                // Sometimes it starts with a colon e.g. ":{...}"
-                if (jsonContent.startsWith(':')) {
-                    jsonContent = jsonContent.substring(1).trim();
-                }
+                // CLEANUP 1: Remove trailing quote/colon from name if present
+                // e.g. "browser_action":" -> "browser_action"
+                toolName = toolName.replace(/["':]+$/, '');
+
+                // CLEANUP 2: Remove leading colon/quote from JSON if present
+                // e.g. ":{"action"..." -> "{"action"..."
+                // e.g. "{"action"..." -> "{"action"..."
+                jsonContent = jsonContent.replace(/^[:"']+/, '');
 
                 try {
                     // Try parsing
@@ -427,7 +506,35 @@ ipcMain.handle('ask-groq', async (_, args: any) => {
         ...(Array.isArray(messages) ? messages : [{ role: "user", content: String(messages) }])
     ];
 
-    const tools = isAgentic ? [TERMINAL_TOOL_DEF, BROWSER_TOOL_DEF, KEYBOARD_TOOL_DEF] : null;
+    const COMPUTER_TOOL_DEF: any = {
+        type: "function",
+        function: {
+            name: "computer_action",
+            description: "Control the mouse and screen. Use this to click, drag, scroll, or get coordinates.",
+            parameters: {
+                type: "object",
+                properties: {
+                    action: {
+                        type: "string",
+                        enum: ["mouse_move", "left_click", "right_click", "double_click", "drag", "scroll", "get_cursor_position", "get_screen_size"],
+                        description: "The action to perform."
+                    },
+                    coordinate: {
+                        type: "array",
+                        items: { type: "integer" },
+                        description: "[x, y] coordinates for the action. Required for move/click/drag."
+                    },
+                    text: {
+                        type: "string",
+                        description: "Additional info (e.g. scroll amount)"
+                    }
+                },
+                required: ["action"]
+            }
+        }
+    };
+
+    const tools = isAgentic ? [TERMINAL_TOOL_DEF, BROWSER_TOOL_DEF, KEYBOARD_TOOL_DEF, COMPUTER_TOOL_DEF] : null;
 
 
     return await askGroqWithFallback(fullMessages, model, 1, tools);
