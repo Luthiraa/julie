@@ -40,19 +40,16 @@ type MessageContent = string | VisionBlock[]
 type ChatMessage = { role: Role; content: MessageContent }
 
 // Tool Types
-type ToolCall = {
-  id: string
-  function: {
-    name: string
-    arguments: string
-  }
-}
+
 
 type PendingCommand = {
   id: string
-  command: string
+  command?: string // for terminal
+  toolName?: string
+  toolArgs?: any
   originalArgs: any
 } | null
+
 
 function App() {
   const [input, setInput] = useState('')
@@ -77,6 +74,10 @@ function App() {
   // Agentic Mode State
   const [isAgenticMode, setIsAgenticMode] = useState(false)
   const [pendingCommand, setPendingCommand] = useState<PendingCommand>(null)
+
+  // Keyboard Tool State
+  const [selectedTargetApp, setSelectedTargetApp] = useState<string | null>(null)
+  const [availableApps, setAvailableApps] = useState<string[]>([])
 
   // Settings State
   const [showSettings, setShowSettings] = useState(false)
@@ -144,6 +145,10 @@ function App() {
     const newState = !isScreenshotMode
     setIsScreenshotMode(newState)
     console.log(newState ? 'use screen enabled' : 'use screen disabled')
+  }
+
+  const toggleSmartMode = () => {
+    setIsSmartMode(!isSmartMode)
   }
 
   const togglePrivacyMode = async () => {
@@ -237,11 +242,38 @@ function App() {
           setPendingCommand({
             id: response.id,
             command: args.command,
+            toolName: fn.name,
+            toolArgs: args,
             originalArgs: apiMessages // Store history to continue later
           })
           // Do NOT clear loading state? OR split flow.
           // We must stop loading to let user interact.
+        } else if (fn.name === 'browser_action') {
+          const args = JSON.parse(fn.arguments)
+          setPendingCommand({
+            id: response.id,
+            toolName: fn.name,
+            toolArgs: args,
+            originalArgs: apiMessages
+          })
+        } else if (fn.name === 'keyboard_action') {
+          const args = JSON.parse(fn.arguments)
+          setPendingCommand({
+            id: response.id,
+            toolName: fn.name,
+            toolArgs: args,
+            originalArgs: apiMessages
+          })
+        } else if (fn.name === 'computer_action') {
+          const args = JSON.parse(fn.arguments)
+          setPendingCommand({
+            id: response.id,
+            toolName: fn.name,
+            toolArgs: args,
+            originalArgs: apiMessages
+          })
         } else {
+
           setMessages(prev => [...prev, { role: 'assistant', content: `Error: Unknown tool ${fn.name}` }])
         }
       }
@@ -255,8 +287,9 @@ function App() {
   const handleApproveCommand = async () => {
     if (!pendingCommand) return
     setIsLoading(true)
-    const { command, originalArgs } = pendingCommand
+    const { command, toolName, toolArgs, originalArgs } = pendingCommand
     setPendingCommand(null)
+
 
     // Add interim "thought" to history (visual only or functional?)
     // We update the functional history for the next call
@@ -264,20 +297,50 @@ function App() {
       ...originalArgs,
       { role: 'assistant', content: `I will run the command: \`${command}\`` }
     ]
-    setMessages(prev => [...prev, { role: 'assistant', content: `Running: \`${command}\`...` }])
+
+    // If a target app is selected, inject it into the toolArgs
+    const finalArgs = { ...toolArgs }
+    if (toolName === 'keyboard_action' && selectedTargetApp) {
+      finalArgs.targetApp = selectedTargetApp
+    }
+
+    setMessages(prev => [...prev, { role: 'assistant', content: `Running: \`${toolName === 'execute_terminal_command' ? command : JSON.stringify(finalArgs)}\`...` }])
+    setPendingCommand(null)
+    setSelectedTargetApp(null) // Reset selection
+    setAvailableApps([]) // Reset apps list
 
     try {
-      const output = await window.ipcRenderer.invoke('run-command', command)
+      let output = ""
+      if (toolName === 'execute_terminal_command' && command) {
+        output = await window.ipcRenderer.invoke('run-command', command)
+      } else if (toolName === 'browser_action') {
+        output = await window.ipcRenderer.invoke('trigger-browser-action', finalArgs)
+      } else if (toolName === 'keyboard_action') {
+        output = await window.ipcRenderer.invoke('trigger-keyboard-action', finalArgs)
+      } else if (toolName === 'computer_action') {
+        output = await window.ipcRenderer.invoke('trigger-computer-action', finalArgs)
+      }
 
       const nextMessages = [
         ...intermediateMessages,
-        { role: 'user', content: `[SYSTEM: Command successfully executed. Output below.]\n\n${output}\n\n[SYSTEM: The command ran successfully. DO NOT run it again. Summarize the result for the user as your final answer.]` }
+        { role: 'user', content: `[SYSTEM: The command ran successfully and produced the output below. STOP. Do NOT propose to run this command again. The user can see the output. Just summarize it.]\n\n${output}` }
       ]
 
-      // Show output in chat so user sees the result (e.g. cowsay)
+      // Show output in chat
       setMessages(prev => [...prev, { role: 'assistant', content: `Output:\n\`\`\`\n${output}\n\`\`\`` }])
 
-      // Loop back to agent
+      // Check if task is done
+      const isStartCommand = command?.trim().toLowerCase().startsWith('start');
+      const isGenericSuccess = output.trim().includes('Success (no output)');
+      const isKeyboardSuccess = toolName === 'keyboard_action' && output.includes('Successfully'); // formatted "Successfully typed/pasted..."
+
+      if (isStartCommand || isGenericSuccess || isKeyboardSuccess) {
+        setMessages(prev => [...prev, { role: 'assistant', content: "Task completed successfully." }]);
+        setIsLoading(false);
+        return; // Stop the loop here
+      }
+
+      // Loop back to agent for other commands (like "list files" where analysis is needed)
       await callAgent(nextMessages)
 
     } catch (err: any) {
@@ -391,10 +454,34 @@ function App() {
           <div className="command-approval-card">
             <div className="approval-header">
               <Terminal size={16} className="text-purple-400" />
-              <span>Julie wants to run a command:</span>
+              <span>Julie wants to {pendingCommand.toolName === 'execute_terminal_command' ? 'run a command' : pendingCommand.toolName === 'keyboard_action' ? 'type text' : 'perform a browser action'}:</span>
             </div>
+
+            {/* Keyboard Action Target Picker */}
+            {pendingCommand.toolName === 'keyboard_action' && (
+              <div className="target-picker">
+                <label>Target:</label>
+                <select
+                  value={selectedTargetApp || ''}
+                  onChange={(e) => setSelectedTargetApp(e.target.value || null)}
+                  onClick={async () => {
+                    // Lazy load apps on click if empty
+                    if (availableApps.length === 0) {
+                      const apps = await window.ipcRenderer.invoke('get-running-apps');
+                      setAvailableApps(apps);
+                    }
+                  }}
+                >
+                  <option value="">Auto (Last Active Window)</option>
+                  {availableApps.map(app => (
+                    <option key={app} value={app}>{app}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <div className="approval-code">
-              <code>{pendingCommand.command}</code>
+              <code>{pendingCommand.toolName === 'execute_terminal_command' ? pendingCommand.command : JSON.stringify(pendingCommand.toolArgs, null, 2)}</code>
             </div>
             <div className="approval-actions">
               <button className="approval-btn deny" onClick={handleDenyCommand}>
@@ -507,10 +594,10 @@ function App() {
                 Use Screen
               </button>
               <button
-                className={`pill-btn ${isSmartMode ? 'blue' : 'ghost'}`}
-                onClick={() => setIsSmartMode(!isSmartMode)}
+                className={`pill-btn ${isSmartMode ? 'active-smart' : ''}`}
+                onClick={toggleSmartMode}
               >
-                <Zap size={14} fill={isSmartMode ? "currentColor" : "none"} />
+                <Zap size={14} />
                 Smart
               </button>
               <button

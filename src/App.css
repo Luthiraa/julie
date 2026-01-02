@@ -23,14 +23,14 @@
 .dock-content {
   display: flex;
   align-items: center;
-  background: rgba(40, 40, 40, 0.4);
-  /* Liquid Glass */
+  background: rgba(40, 40, 40, 0.85);
+  /* Less transparent */
   border-radius: 999px;
   padding: 8px 16px;
   gap: 8px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
   backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .dock-btn {
@@ -51,7 +51,7 @@
 .dock-divider {
   width: 1px;
   height: 16px;
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.15);
   margin: 0 4px;
 }
 
@@ -59,14 +59,15 @@
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: rgba(40, 40, 40, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(40, 40, 40, 0.85);
+  /* Less transparent */
+  border: 1px solid rgba(255, 255, 255, 0.05);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(24px);
 }
 
@@ -86,16 +87,15 @@
   height: 500px;
   margin-top: 80px;
   /* Spacing from top dock */
-  background: rgba(30, 30, 30, 0.45);
-  /* More transparent */
+  background: rgba(30, 30, 30, 0.9);
+  /* Much less transparent (Solid feel) */
   border-radius: 20px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  backdrop-filter: blur(40px);
-  /* Stronger blur */
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(50px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 /* Header */

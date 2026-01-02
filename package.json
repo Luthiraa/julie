@@ -11,16 +11,19 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "bufferutil": "^4.1.0",
     "dotenv": "^17.2.3",
     "fluent-ffmpeg": "^2.1.3",
     "groq-sdk": "^0.37.0",
     "katex": "^0.16.27",
     "lucide-react": "^0.562.0",
+    "puppeteer": "^24.34.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",
     "rehype-katex": "^7.0.1",
-    "remark-math": "^6.0.0"
+    "remark-math": "^6.0.0",
+    "utf-8-validate": "^6.0.6"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

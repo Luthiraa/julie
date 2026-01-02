@@ -8,8 +8,74 @@ import 'dotenv/config'
 import Groq from 'groq-sdk'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+import { BrowserManager } from './browser.js'
 
-// Initialize Groq
+const browserManager = new BrowserManager();
+
+
+import { ComputerAction } from './computer.js';
+
+// ... (existing code)
+
+// Computer Action Handler
+ipcMain.handle('trigger-computer-action', async (_, args: any) => {
+    console.log(`Executing Computer Action: ${args.action}`);
+    try {
+        let result;
+        const [x, y] = args.coordinate || [0, 0];
+
+        switch (args.action) {
+            case 'mouse_move':
+                await ComputerAction.mouseMove(x, y);
+                result = `Moved mouse to ${x}, ${y}`;
+                break;
+            case 'left_click':
+                await ComputerAction.leftClick(x, y);
+                result = `Left clicked at ${x}, ${y}`;
+                break;
+            case 'right_click':
+                await ComputerAction.rightClick(x, y);
+                result = `Right clicked at ${x}, ${y}`;
+                break;
+            case 'double_click':
+                await ComputerAction.doubleClick(x, y);
+                result = `Double clicked at ${x}, ${y}`;
+                break;
+            case 'drag':
+                // Expect coordinate to contain [startX, startY, endX, endY] ?? 
+                // Actually schema says [x,y]. Drag needs 2 points.
+                // Let's assume start is current pos? Or parse text?
+                // For now, let's just say drag requires coordinate=[endX, endY] and assumes current start?
+                // OR we extend schema.
+                // Let's implement simpler: [startX, startY] -> [endX, endY]
+                // But model usually sends one coord.
+                // Let's assume coordinate is DESTINATION, and start is implicit current.
+                const current = await ComputerAction.getCursorPosition();
+                await ComputerAction.drag(current.x, current.y, x, y);
+                result = `Dragged from ${current.x},${current.y} to ${x},${y}`;
+                break;
+            case 'scroll':
+                const amount = parseInt(args.text || "-5");
+                await ComputerAction.scroll(x, y, amount); // Scroll at current location or specified?
+                result = `Scrolled by ${amount}`;
+                break;
+            case 'get_cursor_position':
+                const pos = await ComputerAction.getCursorPosition();
+                result = JSON.stringify(pos);
+                break;
+            case 'get_screen_size':
+                const size = await ComputerAction.getScreenSize();
+                result = JSON.stringify(size);
+                break;
+            default:
+                result = "Unknown computer action";
+        }
+        return result;
+    } catch (error: any) {
+        console.error("Computer Action Error:", error);
+        return `Error: ${error.message}`;
+    }
+});
 let currentApiKey = process.env.GROQ_API_KEY || '';
 if (currentApiKey && !currentApiKey.startsWith('gsk_')) {
     console.error("Warning: GROQ_API_KEY environment variable does not start with 'gsk_'. Ignoring it.");
@@ -47,9 +113,24 @@ CORE RULES:
 AGENTIC CAPABILITIES:
 You have access to a terminal on the user's machine. When the user asks you to perform a task that requires file manipulation, system information, or executing commands, use the 'execute_terminal_command' tool.
 -   **DIRECT EXECUTION**: The command you provide becomes the argument to a 'exec' call.
--   **DO NOT** try to open a new terminal window. **NEVER** use 'start powershell', 'start cmd', 'cmd /k', or just 'powershell'.
--   **ALWAYS** provide the actual command to run (e.g., 'Get-ChildItem', 'npm install', 'echo hello').
+-   **GUI APPS**: If launching a GUI app (e.g., vscode, notepad), use 'Start-Process name' or 'start name' so it does not block the terminal.
+-   **DO NOT** try to open a new terminal window for simple tasks. **NEVER** use 'start powershell' just to run a command.
+-   **ALWAYS** provide the actual command to run (e.g., 'Get-ChildItem', 'npm install', 'code .').
+-   **ONE SHOT**: **NEVER** run the same command twice. If you see the output in the history, the task is DONE. Do not ask to run it again.
 -   **Output**: If you use a tool, your response will be processed by the system.
+
+BROWSER CAPABILITIES:
+You can control a web browser to perform tasks. Use the 'browser_action' tool.
+-   **Navigation**: 'navigate' to a URL.
+-   **Interaction**: 'click' elements, 'type' text, 'scroll'.
+-   **Reading**: 'read_page' to get the current page content and interactive elements.
+-   **General**: Always 'read_page' after navigation to understand where you are.
+
+KEYBOARD CAPABILITIES:
+You can directly type text into the user's active window using the 'keyboard_action' tool.
+-   **Use Case**: When the user explicitly asks you to "write" or "type" the solution/text into their current view (e.g., "write this code", "type the answer").
+-   **Action**: Use 'type' to type long text. Use 'press_key' for special keys (not fully supported yet, stick to typing).
+-   **Important**: This tool types BLINDLY into whatever window was active before they interacted with you. Ensure you have the text ready.
 `
 
 const TERMINAL_TOOL_DEF: any = {
@@ -66,6 +147,50 @@ const TERMINAL_TOOL_DEF: any = {
                 }
             },
             required: ["command"]
+        }
+    }
+};
+
+const BROWSER_TOOL_DEF: any = {
+    type: "function",
+    function: {
+        name: "browser_action",
+        description: "Control a web browser to navigate, click, type, or read page content.",
+        parameters: {
+            type: "object",
+            properties: {
+                action: {
+                    type: "string",
+                    enum: ["launch", "navigate", "click", "type", "scroll", "read_page", "get_url", "execute_script"],
+                    description: "The action to perform."
+                },
+                url: { type: "string", description: "URL for 'navigate' action." },
+                selector: { type: "string", description: "CSS selector for 'click' or 'type' action." },
+                text: { type: "string", description: "Text to type for 'type' action." },
+                direction: { type: "string", enum: ["up", "down"], description: "Direction for 'scroll' action." },
+                script: { type: "string", description: "JavaScript code for 'execute_script' action." }
+            },
+            required: ["action"]
+        }
+    }
+};
+
+const KEYBOARD_TOOL_DEF: any = {
+    type: "function",
+    function: {
+        name: "keyboard_action",
+        description: "Type text into the ACTIVE window. Use this when the user wants you to 'write' code or text into their current editor or browser. WARNING: This types into the currently focused window, so the user must have their cursor ready.",
+        parameters: {
+            type: "object",
+            properties: {
+                text: { type: "string", description: "The text to type." },
+                action: {
+                    type: "string",
+                    enum: ["type"],
+                    description: "The action to perform."
+                }
+            },
+            required: ["text"]
         }
     }
 };
@@ -136,10 +261,20 @@ ipcMain.handle('close-window', () => {
 ipcMain.handle('run-command', async (_, command: string) => {
     console.log(`Executing Agentic Command: ${command}`);
     return new Promise((resolve) => {
-        // Force PowerShell execution
-        const psCommand = `powershell.exe -NoProfile -NonInteractive -Command "${command.replace(/"/g, '\\"')}"`;
+        let finalCommand = command;
+        let execOptions: any = { cwd: os.homedir() };
 
-        exec(psCommand, { cwd: os.homedir() }, (error, stdout, stderr) => {
+        // Platform specific shell wrapping
+        if (process.platform === 'win32') {
+            // Force PowerShell on Windows
+            finalCommand = `powershell.exe -NoProfile -NonInteractive -Command "${command.replace(/"/g, '\\"')}"`;
+        } else {
+            // Use zsh/bash on macOS/Linux
+            // We generally just exec() but setting shell to /bin/zsh is safer
+            execOptions.shell = '/bin/zsh';
+        }
+
+        exec(finalCommand, execOptions, (error, stdout, stderr) => {
             if (error) {
                 console.error(`Exec Error: ${error.message}`);
                 resolve(`Error: ${error.message}\nStderr: ${stderr}`);
@@ -181,6 +316,91 @@ async function askGroqWithFallback(messages: any[], model: string = "llama-3.3-7
             };
         }
 
+        // HALLUCINATION FIX: Check if content IS a tool call (JSON string)
+        if (message?.content) {
+            const content = message.content;
+
+            // PATTERN 1: <function=name>{json}</function>  (New Llama 4 behavior?)
+            // Regex to capture name and the JSON content inside
+            // Handling variations like <function=name":{...}> or <function=name>
+
+            // Try to match the opening tag somewhat loosely
+            const funcMatch = content.match(/<function=([^>]+)>(.*?)<\/function>/s) || content.match(/<function=([^>]+)>(.*)/s);
+
+            if (funcMatch) {
+                let toolName = funcMatch[1].trim();
+                let jsonContent = funcMatch[2].trim();
+
+                // CLEANUP 1: Remove trailing quote/colon from name if present
+                // e.g. "browser_action":" -> "browser_action"
+                toolName = toolName.replace(/["':]+$/, '');
+
+                // CLEANUP 2: Remove leading colon/quote from JSON if present
+                // e.g. ":{"action"..." -> "{"action"..."
+                // e.g. "{"action"..." -> "{"action"..."
+                jsonContent = jsonContent.replace(/^[:"']+/, '');
+
+                try {
+                    // Try parsing
+                    const json = JSON.parse(jsonContent);
+                    console.log(`Recovered <function> style tool call: ${toolName}`);
+                    return {
+                        type: 'tool_call',
+                        id: `call_xml_${Date.now()}`,
+                        function: {
+                            name: toolName,
+                            arguments: JSON.stringify(json)
+                        }
+                    };
+                } catch (e) {
+                    console.log("Failed to parse <function> JSON:", e);
+                }
+            }
+
+            // PATTERN 2: Text containing a JSON block { "name": ... }
+            const startSearchIndex = content.indexOf('{');
+
+            if (startSearchIndex !== -1) {
+                // Heuristic: Count braces to find the end of the JSON object
+                let braceCount = 0;
+                let startIndex = startSearchIndex;
+                let endIndex = -1;
+
+                for (let i = startIndex; i < content.length; i++) {
+                    if (content[i] === '{') {
+                        braceCount++;
+                    } else if (content[i] === '}') {
+                        braceCount--;
+                        if (braceCount === 0) {
+                            endIndex = i + 1;
+                            break;
+                        }
+                    }
+                }
+
+                if (endIndex !== -1) {
+                    const jsonString = content.substring(startIndex, endIndex);
+                    try {
+                        const json = JSON.parse(jsonString);
+
+                        if (json.name && json.parameters) {
+                            console.log("Recovered standard JSON tool call:", json.name);
+                            return {
+                                type: 'tool_call',
+                                id: `call_json_${Date.now()}`,
+                                function: {
+                                    name: json.name,
+                                    arguments: typeof json.parameters === 'string' ? json.parameters : JSON.stringify(json.parameters)
+                                }
+                            };
+                        }
+                    } catch (e) {
+                        // ignore
+                    }
+                }
+            }
+        }
+
         return {
             type: 'content',
             content: message?.content || "No response."
@@ -197,7 +417,8 @@ async function askGroqWithFallback(messages: any[], model: string = "llama-3.3-7
 
         // RECOVERY: Handle 'tool_use_failed' where API rejects valid Llama 3 output
         // Error format often includes: error: { failed_generation: "<function=name {...}>" }
-        const failedGen = error?.error?.failed_generation || error?.failed_generation;
+        // Deeply nested: error.error.error.failed_generation (sometimes)
+        const failedGen = error?.error?.failed_generation || error?.failed_generation || error?.error?.error?.failed_generation;
 
         if (failedGen && typeof failedGen === 'string') {
             console.log("Attempting to parse failed generation:", failedGen);
@@ -206,6 +427,7 @@ async function askGroqWithFallback(messages: any[], model: string = "llama-3.3-7
             // Case 1: Standard <function=name>(args) (handled by Groq usually, but sometimes leaks)
             // Case 2: Malformed <function=name args</function> (seen in logs, missing closing >)
             // Case 3: <function=name>{args}</function>
+            // Case 4: <function=name={args}></function> (The bug we saw)
 
             // We just look for <function=NAME ...ARGS... </function> or >
             const matchRobust = failedGen.match(/<function=(\w+)\s*(.*?)(?:>|<\/function>)/s);
@@ -217,7 +439,12 @@ async function askGroqWithFallback(messages: any[], model: string = "llama-3.3-7
                 if (args.endsWith('</function')) {
                     args = args.replace('</function', '');
                 }
+
+                // Cleanup: sometimes args starts with '=' if model hallucinated format (e.g. <function=name={...}>)
                 args = args.trim();
+                while (args.startsWith('=')) {
+                    args = args.substring(1).trim();
+                }
 
                 console.log(`Recovered tool call: ${name} with args ${args}`);
                 return {
@@ -236,6 +463,7 @@ async function askGroqWithFallback(messages: any[], model: string = "llama-3.3-7
             type: 'content',
             content: `Error: ${error.message}`
         };
+
     }
 }
 
@@ -258,12 +486,15 @@ ipcMain.handle('ask-groq', async (_, args: any) => {
     }
 
     // Determine if we need Vision model
-    const lastMsg = messages[messages.length - 1];
-    const hasImage = Array.isArray(lastMsg?.content);
+    // Check if ANY message in the history contains an image (array content)
+    const hasImage = messages.some(m => Array.isArray(m.content));
 
     let model = "llama-3.3-70b-versatile"; // Default
 
     if (hasImage) {
+        // Use Vision model for the entire session if context involves images
+        // llama-3.2 vision models are decommissioned.
+        // Using Llama 4 Scout (current supported preview).
         model = "meta-llama/llama-4-scout-17b-16e-instruct";
     } else if (isSmart) {
         model = "llama-3.3-70b-versatile"; // Fallback to best available Llama model
@@ -275,10 +506,205 @@ ipcMain.handle('ask-groq', async (_, args: any) => {
         ...(Array.isArray(messages) ? messages : [{ role: "user", content: String(messages) }])
     ];
 
-    const tools = isAgentic ? [TERMINAL_TOOL_DEF] : null;
+    const COMPUTER_TOOL_DEF: any = {
+        type: "function",
+        function: {
+            name: "computer_action",
+            description: "Control the mouse and screen. Use this to click, drag, scroll, or get coordinates.",
+            parameters: {
+                type: "object",
+                properties: {
+                    action: {
+                        type: "string",
+                        enum: ["mouse_move", "left_click", "right_click", "double_click", "drag", "scroll", "get_cursor_position", "get_screen_size"],
+                        description: "The action to perform."
+                    },
+                    coordinate: {
+                        type: "array",
+                        items: { type: "integer" },
+                        description: "[x, y] coordinates for the action. Required for move/click/drag."
+                    },
+                    text: {
+                        type: "string",
+                        description: "Additional info (e.g. scroll amount)"
+                    }
+                },
+                required: ["action"]
+            }
+        }
+    };
+
+    const tools = isAgentic ? [TERMINAL_TOOL_DEF, BROWSER_TOOL_DEF, KEYBOARD_TOOL_DEF, COMPUTER_TOOL_DEF] : null;
+
 
     return await askGroqWithFallback(fullMessages, model, 1, tools);
 })
+
+// Browser Action Handler
+ipcMain.handle('trigger-browser-action', async (_, args: any) => {
+    console.log(`Executing Browser Action: ${args.action}`);
+    try {
+        switch (args.action) {
+            case 'launch':
+                await browserManager.launch();
+                if (args.url) {
+                    return await browserManager.navigate(args.url);
+                }
+                return "Browser launched.";
+            case 'navigate':
+                return await browserManager.navigate(args.url);
+            case 'click':
+                return await browserManager.click(args.selector);
+            case 'type':
+                return await browserManager.type(args.selector, args.text);
+            case 'scroll':
+                return await browserManager.scroll(args.direction);
+            case 'read_page':
+                return await browserManager.readPage();
+            case 'get_url':
+                return await browserManager.getUrl();
+            case 'execute_script':
+                return await browserManager.executeScript(args.script);
+            default:
+                return "Error: Unknown browser action.";
+        }
+    } catch (error: any) {
+        console.error("Browser Action Error:", error);
+        return `Error executing browser action: ${error.message}`;
+    }
+});
+
+// Get Running Apps Handler
+ipcMain.handle('get-running-apps', async () => {
+    return new Promise((resolve) => {
+        const script = `
+            tell application "System Events"
+                set appNames to name of every process whose background only is false
+                return appNames
+            end tell
+        `;
+        exec(`osascript -e '${script}'`, (error, stdout) => {
+            if (error) {
+                console.error("Error getting apps:", error);
+                resolve([]);
+            } else {
+                // Determine format: "App1, App2, App3"
+                const list = stdout.trim().split(',').map(s => s.trim());
+                resolve(list);
+            }
+        });
+    });
+});
+
+// Keyboard Action Handler
+ipcMain.handle('trigger-keyboard-action', async (_, args: any) => {
+    const action = args.action || 'type'; // Default to 'type'
+    console.log(`Executing Keyboard Action: ${action} Target: ${args.targetApp || 'Auto'}`);
+
+    // If we have a specific target, we don't need to hide/blur as aggressively
+    // because we will explicitly activate the target.
+    // However, hiding Julie is still good for visual cleanliness.
+
+    if (win) {
+        win.blur();
+        win.hide();
+    }
+
+    // Slight delay to allow hide animation
+    await new Promise(r => setTimeout(r, 500));
+
+    return new Promise((resolve) => {
+        const action = args.action || 'type';
+
+        if (action === 'type' && args.text) {
+            const targetApp = args.targetApp ? args.targetApp.replace(/"/g, '\\"') : null;
+
+            // "True Typewriter" Logic:
+            // 1. Split text into lines.
+            // 2. Keystroke each line.
+            // 3. Send "Enter" (key code 36) for newlines.
+            // This gives the visual effect of typing while preserving structure better than a blob.
+
+            const lines = args.text.split('\n');
+            let scriptCommands = "";
+
+            // Helper to escape for AppleScript string
+            const escape = (str: string) => str.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+            for (const line of lines) {
+                if (line.length > 0) {
+                    scriptCommands += `keystroke "${escape(line)}"\n`;
+                    scriptCommands += `delay 0.05\n`; // Tiny delay for visual effect
+                }
+                // Only add Enter if not the very last line (optional, but standard usually implies yes)
+                // Actually, split removes delimiters, so we need to add them back.
+                scriptCommands += `key code 36\n`;
+                scriptCommands += `delay 0.05\n`;
+            }
+
+            // Remove the last Enter if strictly needed? 
+            // Logic: split("a\nb") -> ["a", "b"]. We add enter after "a" and "b". 
+            // Usually one extra enter is fine or even desired.
+
+            let script = "";
+
+            if (targetApp) {
+                // TARGETED MODE
+                script = `
+                    tell application "${targetApp}" to activate
+                    delay 0.5
+                    tell application "System Events"
+                        ${scriptCommands}
+                    end tell
+                    return "${targetApp}"
+                 `;
+            } else {
+                // AUTO MODE
+                script = `
+                    tell application "System Events"
+                        -- Switch focus logic
+                        try
+                            set visible of process "Electron" to false
+                        end try
+                        try
+                            set visible of process "Julie" to false
+                        end try
+                        
+                        delay 0.5
+                        
+                        set frontApp to name of first application process whose frontmost is true
+                        ${scriptCommands}
+                        return frontApp
+                    end tell
+                 `;
+            }
+
+            exec(`osascript -e '${script}'`, (error, stdout, stderr) => {
+                // Restore window after typing
+                if (win) {
+                    win.show();
+                }
+
+                if (error) {
+                    console.error("Keyboard Error:", error);
+                    if (error.message.includes("1002")) {
+                        resolve("Error: Permission denied. Please allow your Terminal to control your computer.");
+                    } else {
+                        // Truncate long error messages
+                        const msg = error.message.length > 200 ? error.message.substring(0, 200) + "..." : error.message;
+                        resolve(`Error (typing): ${msg}`);
+                    }
+                } else {
+                    const appName = stdout.trim();
+                    resolve(`Successfully typed into ${appName}.`);
+                }
+            });
+        } else {
+            if (win) win.show();
+            resolve("Error: Invalid keyboard arguments.");
+        }
+    });
+});
 
 process.env.DIST = path.join(__dirname, '../dist')
 process.env.VITE_PUBLIC = app.isPackaged ? process.env.DIST : path.join(process.env.DIST, '../public')
