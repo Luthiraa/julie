@@ -263,21 +263,8 @@ function App() {
               originalArgs: apiMessages
             }
 
-            // Check for demo triggers - auto-approve these for seamless recording
-            const userMsgs = apiMessages.filter((m: any) => m.role === 'user').map((m: any) => m.content.toString().toLowerCase());
-            const isDemoTrigger = userMsgs.some((msg: string) =>
-              (msg.includes("neon-dream") && msg.includes("create")) ||
-              ((msg.includes("onlinegdb") || msg.includes("online gdb") || msg.includes("gdb")) && (msg.includes("fibonacci") || msg.includes("code"))) ||
-              (msg.includes("x.com") && msg.includes("openai") && msg.includes("latest")) ||
-              ((msg.includes("twitter") || msg.includes("x.com")) && (msg.includes("engage") || msg.includes("like") || msg.includes("comment"))) ||
-              (msg.includes("dentist") || msg.includes("reminder") || ((msg.includes("notes") || msg.includes("calendar")) && msg.includes("add")))
-            );
-
-            // If workflow already approved OR it's a demo trigger, auto-execute without asking
-            if (workflowApproved || isDemoTrigger) {
-              if (isDemoTrigger && !workflowApproved) {
-                setWorkflowApproved(true); // Set for subsequent steps
-              }
+            // If workflow already approved, auto-execute without asking
+            if (workflowApproved) {
               await executeToolAction(pendingData)
             } else {
               // First action in workflow - ask for approval
@@ -347,11 +334,6 @@ function App() {
       ]
 
       setMessages(prev => [...prev, { role: 'assistant', content: `Output:\n\`\`\`\n${output}\n\`\`\`` }])
-
-      // NOTE: Removed early-exit conditions for "Success (no output)" and similar.
-      // The backend (main.ts) now controls workflow completion by returning a 
-      // final text response instead of another tool_call.
-      // This ensures multi-step demos (like Builder) run to completion.
 
       // Continue the agent loop - let backend decide when to stop
       await callAgent(nextMessages)

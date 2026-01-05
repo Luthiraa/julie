@@ -23,7 +23,7 @@ Julie is also **agentic** — it can autonomously control your browser, execute 
 
 Built in a weekend to see if it was possible, and open-sourced for anyone who wants to explore or extend it.
 
-## 💾 Downloads
+## Downloads
 
 Get the latest version from the **[Releases Page](https://github.com/Luthiraa/julie/releases)**.
 
@@ -33,18 +33,18 @@ Get the latest version from the **[Releases Page](https://github.com/Luthiraa/ju
 | **Windows** | x64 (Standard) | [`Julie-Setup-0.0.1-x64.exe`](https://github.com/Luthiraa/julie/releases/download/v0.0.1/Julie-Setup-0.0.1-x64.exe) |
 | **Windows** | ARM64 (Surface/Snapdragon) | [`Julie-Setup-0.0.1-arm64.exe`](https://github.com/Luthiraa/julie/releases/download/v0.0.1/Julie-Setup-0.0.1-arm64.exe) |
 
-## ✨ Features
+## Features
 
-*   **👻 Invisible Interface**: A transparent window that blends into your desktop.
-*   **🖱️ Ghost Mode**: Click-through capability (`Cmd+Shift+I`) to keep Julie visible while you work.
-*   **🧠 AI-Powered**: Uses **Groq** (Llama 3 70B & Llama 4 Scout) for instant, reasoning-heavy responses.
-*   **👁️ Vision**: One-click analysis of your current screen content.
+*   **Invisible Interface**: A transparent window that blends into your desktop.
+*   **Ghost Mode**: Click-through capability (`Cmd+Shift+I`) to keep Julie visible while you work.
+*   **AI-Powered**: Uses **Groq** (Llama 3 70B & Llama 4 Scout) for instant, reasoning-heavy responses.
+*   **Vision**: One-click analysis of your current screen content.
 
-## 🤖 Agentic Capabilities
+## Agentic Capabilities
 
 Julie can autonomously perform tasks on your behalf using the following tools:
 
-### 🌐 Browser Automation
+### Browser Automation
 Control a web browser (powered by Puppeteer) to:
 *   **Navigate** to any URL
 *   **Click** on elements using CSS selectors
@@ -53,7 +53,7 @@ Control a web browser (powered by Puppeteer) to:
 *   **Read** page content and interactable elements
 *   **Execute** custom JavaScript
 
-### 🖥️ Computer Use (macOS)
+### Computer Use (macOS)
 Native system control via JXA (JavaScript for Automation):
 *   **Mouse Movement** — Move cursor to specific coordinates
 *   **Click Actions** — Left click, right click, double click
@@ -61,13 +61,13 @@ Native system control via JXA (JavaScript for Automation):
 *   **Scroll** — Scroll at any position on screen
 *   **Screen Info** — Get screen size and cursor position
 
-### ⌨️ Keyboard Control
+### Keyboard Control
 *   **Type Text** — Simulate keyboard input to any active window
 
-### 💻 Terminal Execution
+### Terminal Execution
 *   **Run Commands** — Execute shell commands directly from the assistant
 
-## ⌨️ Shortcuts
+## Shortcuts
 
 | Action | macOS | Windows |
 | :--- | :--- | :--- |
@@ -75,7 +75,7 @@ Native system control via JXA (JavaScript for Automation):
 | **Toggle Visibility** | `Cmd + ]` | `Ctrl + ]` |
 | **Move Window** | `Cmd + Arrow Keys` | `Ctrl + Arrow Keys` |
 
-## 🚀 Setup
+## Setup
 
 1.  **Install**: Download and install the app for your OS.
 2.  **Configure API**:
