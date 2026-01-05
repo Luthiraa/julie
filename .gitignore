@@ -28,3 +28,4 @@ release
 *.env
 AGENTS.md
 release/
+TECHNICAL_DOCS.md
