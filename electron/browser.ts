@@ -37,6 +37,33 @@ export class BrowserManager {
         this.page = pages.length > 0 ? pages[0] : await this.browser.newPage();
     }
 
+    // Force launch a NEW visible browser (closes existing first)
+    async launchFresh() {
+        console.log("Launching fresh visible browser...");
+        // Close existing
+        if (this.browser) {
+            try {
+                await this.browser.close();
+            } catch (e) {
+                // Ignore close errors
+            }
+            this.browser = null;
+            this.page = null;
+        }
+
+        // Always launch a new one (skip 9222 connection attempt)
+        this.browser = await puppeteer.launch({
+            headless: false,
+            defaultViewport: null,
+            userDataDir: USER_DATA_DIR,
+            args: ['--start-maximized', '--new-window']
+        });
+
+        const pages = await this.browser.pages();
+        this.page = pages.length > 0 ? pages[0] : await this.browser.newPage();
+        return "Fresh browser launched.";
+    }
+
     private async ensurePage() {
         if (!this.browser || !this.page) {
             await this.launch();
@@ -73,6 +100,16 @@ export class BrowserManager {
         }
     }
 
+    async press_key(key: string) {
+        const p = await this.ensurePage();
+        try {
+            await p.keyboard.press(key as any);
+            return `Pressed key: ${key}`;
+        } catch (e: any) {
+            return `Error pressing key ${key}: ${e.message}`;
+        }
+    }
+
     async scroll(direction: 'up' | 'down') {
         const p = await this.ensurePage();
         await p.evaluate((dir) => {
@@ -84,45 +121,89 @@ export class BrowserManager {
     async readPage() {
         const p = await this.ensurePage();
 
-        // Simple extraction strategy: get visible text or interactable elements
-        // For now, we'll return a simplified markdown of the body text to give context
+        // Enhanced extraction for better AI understanding
         const content = await p.evaluate(() => {
-            // Helper to get minimal useful text
-            const cleanText = (text: string) => text.replace(/\s+/g, ' ').trim();
+            const cleanText = (text: string) => text.replace(/\s+/g, ' ').trim().substring(0, 100);
 
-            // Get all buttons and links for context
-            const interactables = Array.from(document.querySelectorAll('button, a, input, textarea, [role="button"]'))
-                .slice(0, 50) // Limit to avoid token overflow
-                .map(el => {
-                    const tag = el.tagName.toLowerCase();
-                    const text = (el as HTMLElement).innerText || (el as HTMLInputElement).placeholder || (el as HTMLInputElement).value || '';
-                    const clean = cleanText(text);
-                    if (!clean) return null;
+            // Build unique, reliable selectors
+            const getSelector = (el: Element, index: number): string => {
+                // Priority 1: data-testid (most reliable)
+                if (el.hasAttribute('data-testid')) {
+                    return `[data-testid="${el.getAttribute('data-testid')}"]`;
+                }
+                // Priority 2: ID
+                if (el.id) {
+                    return `#${el.id}`;
+                }
+                // Priority 3: aria-label
+                if (el.getAttribute('aria-label')) {
+                    return `[aria-label="${el.getAttribute('aria-label')}"]`;
+                }
+                // Priority 4: name attribute (for forms)
+                if (el.getAttribute('name')) {
+                    return `[name="${el.getAttribute('name')}"]`;
+                }
+                // Priority 5: role + text combo (Using standard selector, NO :has-text)
+                // We return a "hint" for the user/model, but for actual clicking we need a robust path
+                // Since :has-text is non-standard, we fallback to index based or just return the tag for now
+                // Ideally we'd use XPath, but for simplicity let's rely on structural attributes
+                const role = el.getAttribute('role');
+                if (role) {
+                    return `[role="${role}"]`;
+                }
 
-                    // Try to generate a unique selector
-                    let selector = tag;
-                    if (el.id) selector += `#${el.id}`;
-                    else if (el.hasAttribute('data-testid')) selector += `[data-testid="${el.getAttribute('data-testid')}"]`;
-                    else if (el.getAttribute('aria-label')) selector += `[aria-label="${el.getAttribute('aria-label')}"]`;
-                    else if (el.getAttribute('name')) selector += `[name="${el.getAttribute('name')}"]`;
-                    else if (el.className && typeof el.className === 'string') selector += `.${el.className.split(' ')[0]}`;
+                // Priority 6: Standard class (if unique-ish)
+                if (el.className && typeof el.className === 'string' && el.className.trim().length > 0) {
+                    const cls = el.className.split(' ')[0];
+                    if (cls) return `.${cls}`;
+                }
 
-                    // Add important attributes to description
-                    const ariaLabel = el.getAttribute('aria-label') ? `(Label: "${el.getAttribute('aria-label')}")` : '';
+                // Fallback: tag + nth-of-type
+                return `${el.tagName.toLowerCase()}:nth-of-type(${index + 1})`;
+            };
 
-                    if (!clean && !ariaLabel) return null;
-
-                    return `[${tag}] ${clean} ${ariaLabel} (Selector: ${selector})`;
+            // Get clickable elements
+            const clickables = Array.from(document.querySelectorAll('button, a, [role="button"], [onclick], input[type="submit"]'))
+                .slice(0, 50)
+                .map((el, idx) => {
+                    const text = cleanText((el as HTMLElement).innerText || (el as HTMLInputElement).value || '');
+                    const ariaLabel = el.getAttribute('aria-label') || '';
+                    const label = text || ariaLabel || '(no text)';
+                    const selector = getSelector(el, idx);
+                    return `• CLICK: "${label}" → selector: ${selector}`;
                 })
                 .filter(Boolean);
 
+            // Get input fields
+            const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]), textarea'))
+                .slice(0, 15)
+                .map((el, idx) => {
+                    const placeholder = (el as HTMLInputElement).placeholder || '';
+                    const name = el.getAttribute('name') || '';
+                    const label = placeholder || name || '(unnamed input)';
+                    const selector = getSelector(el, idx);
+                    return `• INPUT: "${label}" → selector: ${selector}`;
+                });
+
+            // Get page summary text
             const bodyText = document.body.innerText.split('\n')
                 .map(line => cleanText(line))
-                .filter(line => line.length > 20) // Filter short noise
-                .slice(0, 20) // Limit body text
+                .filter(line => line.length > 30)
+                .slice(0, 10)
                 .join('\n');
 
-            return `--- Page Content ---\nTitle: ${document.title}\nURL: ${document.location.href}\n\n--- Interactable Elements (Sample) ---\n${interactables.join('\n')}\n\n--- Main Text Preview ---\n${bodyText}`;
+            return `=== PAGE INFO ===
+Title: ${document.title}
+URL: ${document.location.href}
+
+=== CLICKABLE ELEMENTS ===
+${clickables.join('\n')}
+
+=== INPUT FIELDS ===
+${inputs.join('\n')}
+
+=== PAGE TEXT (Preview) ===
+${bodyText}`;
         });
 
         return content;

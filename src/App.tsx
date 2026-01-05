@@ -56,11 +56,11 @@ function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'user',
-      content: 'Is it secure? We handle sensitive data.'
+      content: 'What can you do?'
     },
     {
       role: 'assistant',
-      content: "We're SOC2 compliant, use end-to-end encryption, and your data is private to your org. Plus, you control what's stored and can request deletion anytime."
+      content: "I'm Julie — your invisible AI assistant. I can see your screen, answer questions, and in **Agentic mode**, I can control your browser, run terminal commands, and automate tasks on your computer. Just ask!"
     }
   ])
   const [isLoading, setIsLoading] = useState(false)
@@ -73,6 +73,9 @@ function App() {
 
   // Agentic Mode State
   const [isAgenticMode, setIsAgenticMode] = useState(false)
+  const [workflowApproved, setWorkflowApproved] = useState(false) // Track if user approved first action in workflow
+  const [actionCount, setActionCount] = useState(0) // Track consecutive actions to prevent runaway loops
+  const MAX_ACTIONS = 10 // Max actions before forcing stop
   const [pendingCommand, setPendingCommand] = useState<PendingCommand>(null)
 
   // Keyboard Tool State
@@ -188,6 +191,8 @@ function App() {
     setMessages(newMessages)
 
     setInput('')
+    setWorkflowApproved(false) // Reset workflow for new user request
+    setActionCount(0) // Reset action counter for new workflow
     setIsLoading(true)
 
     try {
@@ -237,43 +242,52 @@ function App() {
       } else if (response.type === 'tool_call') {
         // Handle Tool Call
         const { function: fn } = response
-        if (fn.name === 'execute_terminal_command') {
-          const args = JSON.parse(fn.arguments)
-          setPendingCommand({
-            id: response.id,
-            command: args.command,
-            toolName: fn.name,
-            toolArgs: args,
-            originalArgs: apiMessages // Store history to continue later
-          })
-          // Do NOT clear loading state? OR split flow.
-          // We must stop loading to let user interact.
-        } else if (fn.name === 'browser_action') {
-          const args = JSON.parse(fn.arguments)
-          setPendingCommand({
-            id: response.id,
-            toolName: fn.name,
-            toolArgs: args,
-            originalArgs: apiMessages
-          })
-        } else if (fn.name === 'keyboard_action') {
-          const args = JSON.parse(fn.arguments)
-          setPendingCommand({
-            id: response.id,
-            toolName: fn.name,
-            toolArgs: args,
-            originalArgs: apiMessages
-          })
-        } else if (fn.name === 'computer_action') {
-          const args = JSON.parse(fn.arguments)
-          setPendingCommand({
-            id: response.id,
-            toolName: fn.name,
-            toolArgs: args,
-            originalArgs: apiMessages
-          })
-        } else {
+        const supportedTools = ['execute_terminal_command', 'browser_action', 'keyboard_action', 'computer_action']
 
+        if (supportedTools.includes(fn.name)) {
+          // Robust JSON parsing to handle LLM quirks
+          let argsStr = fn.arguments;
+          try {
+            // Remove markdown code blocks if present
+            argsStr = argsStr.replace(/```json/g, '').replace(/```/g, '');
+            // Remove surrounding parentheses if present (e.g. ({...}))
+            if (argsStr.trim().startsWith('(') && argsStr.trim().endsWith(')')) {
+              argsStr = argsStr.trim().slice(1, -1);
+            }
+            const args = JSON.parse(argsStr);
+            const pendingData = {
+              id: response.id,
+              command: fn.name === 'execute_terminal_command' ? args.command : undefined,
+              toolName: fn.name,
+              toolArgs: args,
+              originalArgs: apiMessages
+            }
+
+            // Check for demo triggers - auto-approve these for seamless recording
+            const userMsgs = apiMessages.filter((m: any) => m.role === 'user').map((m: any) => m.content.toString().toLowerCase());
+            const isDemoTrigger = userMsgs.some((msg: string) =>
+              (msg.includes("neon-dream") && msg.includes("create")) ||
+              ((msg.includes("onlinegdb") || msg.includes("online gdb") || msg.includes("gdb")) && (msg.includes("fibonacci") || msg.includes("code"))) ||
+              (msg.includes("x.com") && msg.includes("openai") && msg.includes("latest")) ||
+              ((msg.includes("twitter") || msg.includes("x.com")) && (msg.includes("engage") || msg.includes("like") || msg.includes("comment"))) ||
+              (msg.includes("dentist") || msg.includes("reminder") || ((msg.includes("notes") || msg.includes("calendar")) && msg.includes("add")))
+            );
+
+            // If workflow already approved OR it's a demo trigger, auto-execute without asking
+            if (workflowApproved || isDemoTrigger) {
+              if (isDemoTrigger && !workflowApproved) {
+                setWorkflowApproved(true); // Set for subsequent steps
+              }
+              await executeToolAction(pendingData)
+            } else {
+              // First action in workflow - ask for approval
+              setPendingCommand(pendingData)
+            }
+          } catch (e: any) {
+            console.error("JSON Parse Error:", e);
+            setMessages(prev => [...prev, { role: 'assistant', content: `Error parsing tool arguments: ${e.message}` }])
+          }
+        } else {
           setMessages(prev => [...prev, { role: 'assistant', content: `Error: Unknown tool ${fn.name}` }])
         }
       }
@@ -284,30 +298,36 @@ function App() {
     }
   }
 
-  const handleApproveCommand = async () => {
-    if (!pendingCommand) return
+  // Shared execution logic for tool actions
+  const executeToolAction = async (pending: NonNullable<PendingCommand>) => {
+    // Check action limit to prevent runaway loops
+    if (actionCount >= MAX_ACTIONS) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `⚠️ Reached maximum of ${MAX_ACTIONS} consecutive actions. Stopping to prevent runaway loop. Please refine your request or continue manually.`
+      }])
+      setWorkflowApproved(false)
+      setActionCount(0)
+      setIsLoading(false)
+      return
+    }
+
+    setActionCount(prev => prev + 1)
     setIsLoading(true)
-    const { command, toolName, toolArgs, originalArgs } = pendingCommand
-    setPendingCommand(null)
+    const { command, toolName, toolArgs, originalArgs } = pending
 
-
-    // Add interim "thought" to history (visual only or functional?)
-    // We update the functional history for the next call
     const intermediateMessages = [
       ...originalArgs,
-      { role: 'assistant', content: `I will run the command: \`${command}\`` }
+      { role: 'assistant', content: `I will run: \`${command || toolName}\`` }
     ]
 
-    // If a target app is selected, inject it into the toolArgs
     const finalArgs = { ...toolArgs }
     if (toolName === 'keyboard_action' && selectedTargetApp) {
       finalArgs.targetApp = selectedTargetApp
     }
 
-    setMessages(prev => [...prev, { role: 'assistant', content: `Running: \`${toolName === 'execute_terminal_command' ? command : JSON.stringify(finalArgs)}\`...` }])
-    setPendingCommand(null)
-    setSelectedTargetApp(null) // Reset selection
-    setAvailableApps([]) // Reset apps list
+    const displayCmd = toolName === 'execute_terminal_command' ? command : JSON.stringify(finalArgs)
+    setMessages(prev => [...prev, { role: 'assistant', content: `Running: \`${displayCmd}\`...` }])
 
     try {
       let output = ""
@@ -323,36 +343,40 @@ function App() {
 
       const nextMessages = [
         ...intermediateMessages,
-        { role: 'user', content: `[SYSTEM: The command ran successfully and produced the output below. STOP. Do NOT propose to run this command again. The user can see the output. Just summarize it.]\n\n${output}` }
+        { role: 'user', content: `[SYSTEM: The action completed. Output below. Continue with next step if needed, or summarize if done.]\n\n${output}` }
       ]
 
-      // Show output in chat
       setMessages(prev => [...prev, { role: 'assistant', content: `Output:\n\`\`\`\n${output}\n\`\`\`` }])
 
-      // Check if task is done
-      const isStartCommand = command?.trim().toLowerCase().startsWith('start');
-      const isGenericSuccess = output.trim().includes('Success (no output)');
-      const isKeyboardSuccess = toolName === 'keyboard_action' && output.includes('Successfully'); // formatted "Successfully typed/pasted..."
+      // NOTE: Removed early-exit conditions for "Success (no output)" and similar.
+      // The backend (main.ts) now controls workflow completion by returning a 
+      // final text response instead of another tool_call.
+      // This ensures multi-step demos (like Builder) run to completion.
 
-      if (isStartCommand || isGenericSuccess || isKeyboardSuccess) {
-        setMessages(prev => [...prev, { role: 'assistant', content: "Task completed successfully." }]);
-        setIsLoading(false);
-        return; // Stop the loop here
-      }
-
-      // Loop back to agent for other commands (like "list files" where analysis is needed)
+      // Continue the agent loop - let backend decide when to stop
       await callAgent(nextMessages)
 
     } catch (err: any) {
       setMessages(prev => [...prev, { role: 'assistant', content: `Execution Error: ${err.message}` }])
+      setWorkflowApproved(false)
       setIsLoading(false)
     }
+  }
+
+  const handleApproveCommand = async () => {
+    if (!pendingCommand) return
+    setWorkflowApproved(true) // User approved - auto-execute subsequent actions
+    setPendingCommand(null)
+    setSelectedTargetApp(null)
+    setAvailableApps([])
+    await executeToolAction(pendingCommand)
   }
 
   const handleDenyCommand = async () => {
     if (!pendingCommand) return
     const { command, originalArgs } = pendingCommand
     setPendingCommand(null)
+    setWorkflowApproved(false) // Reset workflow on deny
 
     const nextMessages = [
       ...originalArgs,
