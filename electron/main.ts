@@ -6,6 +6,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import 'dotenv/config'
 import Groq from 'groq-sdk'
+import { Ollama } from 'ollama'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 import { BrowserManager } from './browser.js'
@@ -334,7 +335,138 @@ ipcMain.handle('run-command', async (_, command: string) => {
     });
 });
 
+// Ollama client for local LLM fallback
+const ollama = new Ollama({ host: 'http://127.0.0.1:11434' });
+let ollamaProcess: any = null;
+
+// Check if Ollama is running
+async function isOllamaRunning(): Promise<boolean> {
+    try {
+        const response = await fetch('http://127.0.0.1:11434/api/tags');
+        return response.ok;
+    } catch {
+        return false;
+    }
+}
+
+// Start Ollama server if not running
+async function ensureOllamaRunning(): Promise<boolean> {
+    if (await isOllamaRunning()) {
+        console.log('Ollama is already running');
+        return true;
+    }
+
+    console.log('Starting Ollama server...');
+
+    try {
+        // Spawn ollama serve in background
+        const { spawn } = await import('node:child_process');
+        ollamaProcess = spawn('ollama', ['serve'], {
+            detached: true,
+            stdio: 'ignore'
+        });
+        ollamaProcess.unref(); // Allow parent to exit independently
+
+        // Wait for Ollama to be ready (max 10 seconds)
+        for (let i = 0; i < 20; i++) {
+            await new Promise(r => setTimeout(r, 500));
+            if (await isOllamaRunning()) {
+                console.log('Ollama server started successfully');
+                return true;
+            }
+        }
+        console.error('Ollama server failed to start in time');
+        return false;
+    } catch (error: any) {
+        console.error('Failed to start Ollama:', error.message);
+        return false;
+    }
+}
+
+// Fallback to local Ollama when Groq is rate limited
+async function askOllamaFallback(messages: any[], hasImage: boolean = false, tools: any[] | null = null): Promise<any> {
+    try {
+        // Ensure Ollama is running first
+        const ollamaReady = await ensureOllamaRunning();
+        if (!ollamaReady) {
+            return {
+                type: 'content',
+                content: 'Failed to start local Ollama server. Please ensure Ollama is installed.'
+            };
+        }
+
+        // Use vision model if there are images, otherwise use text model
+        const model = hasImage ? 'qwen3-vl:4b' : 'llama3.2';
+        console.log(`\n🟠 [Local] Using local Ollama fallback with model: ${model}`);
+
+        // Convert messages to Ollama format
+        const ollamaMessages = messages.map(m => {
+            if (Array.isArray(m.content)) {
+                // Handle multimodal content (text + images)
+                const textParts = m.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n');
+                const imageParts = m.content.filter((c: any) => c.type === 'image_url').map((c: any) => {
+                    // Extract base64 from data URL
+                    const dataUrl = c.image_url?.url || '';
+                    if (dataUrl.startsWith('data:')) {
+                        return dataUrl.split(',')[1]; // Get base64 part
+                    }
+                    return dataUrl;
+                });
+                return {
+                    role: m.role,
+                    content: textParts,
+                    images: imageParts.length > 0 ? imageParts : undefined
+                };
+            }
+            return { role: m.role, content: m.content };
+        });
+
+        // Build request options
+        const options: any = {
+            model,
+            messages: ollamaMessages,
+            stream: false,
+        };
+
+        // Add tools if provided (Ollama supports function calling)
+        if (tools && tools.length > 0) {
+            options.tools = tools;
+        }
+
+        const response: any = await ollama.chat(options);
+
+        // Check for tool calls
+        if (response.message?.tool_calls && response.message.tool_calls.length > 0) {
+            const toolCall = response.message.tool_calls[0];
+            return {
+                type: 'tool_call',
+                id: `call_ollama_${Date.now()}`,
+                function: {
+                    name: toolCall.function.name,
+                    arguments: typeof toolCall.function.arguments === 'string'
+                        ? toolCall.function.arguments
+                        : JSON.stringify(toolCall.function.arguments)
+                }
+            };
+        }
+
+        return {
+            type: 'content',
+            content: response.message?.content || 'No response from local model.'
+        };
+
+    } catch (error: any) {
+        console.error('Ollama fallback error:', error);
+        return {
+            type: 'content',
+            content: `Local LLM Error: ${error.message}. Make sure Ollama is installed and models are available.`
+        };
+    }
+}
+
+
 async function askGroqWithFallback(messages: any[], model: string = "llama-3.3-70b-versatile", retries = 1, tools: any[] | null = null): Promise<any> {
+    console.log(`\n🔵 [Groq] Attempting request using model: ${model}`);
     try {
         const params: any = {
             messages,
@@ -457,10 +589,18 @@ async function askGroqWithFallback(messages: any[], model: string = "llama-3.3-7
     } catch (error: any) {
         console.error("Groq Error (" + model + "):", error);
 
-        // Check for Rate Limit (429)
-        if (error?.status === 429 && retries > 0) {
-            console.log("Rate limit hit. Switching to fallback model: llama-3.1-8b-instant");
-            return askGroqWithFallback(messages, "llama-3.1-8b-instant", retries - 1, tools);
+        // Check for Rate Limit (429) OR Token Limit (413 with code 'rate_limit_exceeded')
+        // Groq returns 413 for TPM (Tokens Per Minute) limits, which we should treat as a rate limit fallback.
+        const isRateLimit =
+            error?.status === 429 ||
+            (error?.status === 413 && error?.error?.code === 'rate_limit_exceeded') ||
+            (error?.status === 413 && error?.error?.error?.code === 'rate_limit_exceeded') ||
+            (error?.status === 413 && error?.error?.error?.type === 'tokens');
+
+        if (isRateLimit) {
+            console.log(`Rate limit hit (Status: ${error?.status}). Switching to local Ollama fallback.`);
+            const hasImage = messages.some(m => Array.isArray(m.content));
+            return askOllamaFallback(messages, hasImage, tools);
         }
 
         // RECOVERY: Handle 'tool_use_failed' where API rejects valid Llama 3 output
@@ -522,9 +662,8 @@ async function askGroqWithFallback(messages: any[], model: string = "llama-3.3-7
 }
 
 ipcMain.handle('ask-groq', async (_, args: any) => {
-    if (!currentApiKey) {
-        return { type: 'content', content: "Error: API Key not configured. Please add one in Settings." };
-    }
+    // API Key check moved to end to allow local fallback logic
+
 
     // Handle both old (array only) and new ({messages, isSmart, isAgentic}) signatures
     let messages: any[];
@@ -589,6 +728,12 @@ ipcMain.handle('ask-groq', async (_, args: any) => {
     };
 
     const tools = isAgentic ? [TERMINAL_TOOL_DEF, BROWSER_TOOL_DEF, KEYBOARD_TOOL_DEF, COMPUTER_TOOL_DEF] : null;
+
+    // Fallback if no API Key is configured
+    if (!currentApiKey) {
+        console.log("🟠 [System] No Groq API Key configured. Switching to local Ollama.");
+        return await askOllamaFallback(fullMessages, hasImage, tools);
+    }
 
     return await askGroqWithFallback(fullMessages, model, 1, tools);
 })

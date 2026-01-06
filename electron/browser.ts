@@ -1,5 +1,5 @@
 
-import puppeteer, { Browser, Page } from 'puppeteer';
+import puppeteer, { Browser, Page } from 'puppeteer-core';
 import path from 'node:path';
 import os from 'node:os';
 
@@ -25,10 +25,12 @@ export class BrowserManager {
             // Proceed to launch standard instance...
 
             console.log("Launching browser with data dir:", USER_DATA_DIR);
+            console.log("Launching browser with data dir:", USER_DATA_DIR);
             this.browser = await puppeteer.launch({
                 headless: false, // User wants to see it
                 defaultViewport: null, // Full width
                 userDataDir: USER_DATA_DIR,
+                executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', // Mac fallback
                 args: ['--start-maximized']
             });
         }
@@ -56,6 +58,7 @@ export class BrowserManager {
             headless: false,
             defaultViewport: null,
             userDataDir: USER_DATA_DIR,
+            executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', // Mac fallback
             args: ['--start-maximized', '--new-window']
         });
 

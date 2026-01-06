@@ -91,6 +91,22 @@ function App() {
   })
   const [newScenario, setNewScenario] = useState('')
 
+  // Dynamic Loading Text
+  const [loadingText, setLoadingText] = useState('Thinking...')
+  useEffect(() => {
+    if (!isLoading) {
+      setLoadingText('Thinking...')
+      return
+    }
+    const texts = ['Thinking...', 'Analyzing...', 'Composing...', 'Writing...']
+    let i = 0
+    const interval = setInterval(() => {
+      i = (i + 1) % texts.length
+      setLoadingText(texts[i])
+    }, 800)
+    return () => clearInterval(interval)
+  }, [isLoading])
+
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -451,7 +467,9 @@ function App() {
         ))}
         {isLoading && (
           <div className="message-row assistant">
-            <div className="message-bubble assistant pulse">Composing…</div>
+            <div className="message-bubble assistant pulse">
+              {loadingText}
+            </div>
           </div>
         )}
 
