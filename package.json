@@ -1,7 +1,7 @@
 {
   "name": "julie",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.2.0",
   "main": "dist-electron/main.js",
   "type": "module",
   "scripts": {
@@ -17,7 +17,8 @@
     "groq-sdk": "^0.37.0",
     "katex": "^0.16.27",
     "lucide-react": "^0.562.0",
-    "puppeteer": "^24.34.0",
+    "ollama": "^0.6.3",
+    "puppeteer-core": "^24.34.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",
