@@ -1,0 +1,246 @@
+.page {
+    position: relative;
+    min-height: 100vh;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    overflow-x: hidden;
+}
+
+.backgroundImage {
+    position: fixed;
+    inset: 0;
+    background-image: url('/ascii-art.png');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    z-index: 0;
+    opacity: 0.25;
+    filter: blur(2px);
+}
+
+.main {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 4rem 2rem;
+    padding-bottom: 6rem;
+}
+
+.column {
+    max-width: 600px;
+    width: 100%;
+    text-align: left;
+    background: radial-gradient(ellipse at center,
+            rgba(255, 255, 255, 0.2) 0%,
+            rgba(255, 255, 255, 0.12) 50%,
+            rgba(255, 255, 255, 0) 100%);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    padding: 4rem 3rem;
+    border: none;
+    box-shadow: none;
+}
+
+.backLink {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    color: #666;
+    text-decoration: none;
+    margin-bottom: 2rem;
+    transition: color 0.2s ease;
+}
+
+.backLink:hover {
+    color: #111;
+}
+
+.title {
+    font-size: 1.25rem;
+    font-weight: 500;
+    color: #111;
+    margin-bottom: 2rem;
+    line-height: 1.4;
+}
+
+.section {
+    margin-bottom: 2.5rem;
+}
+
+.sectionTitle {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #222;
+    margin-bottom: 1rem;
+    letter-spacing: 0.02em;
+}
+
+.body {
+    font-size: 0.8rem;
+    font-weight: 400;
+    color: #333;
+    line-height: 1.8;
+    margin-bottom: 1rem;
+}
+
+.body:last-of-type {
+    margin-bottom: 0;
+}
+
+.featureList {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.featureItem {
+    font-size: 0.78rem;
+    color: #333;
+    line-height: 1.7;
+    margin-bottom: 0.75rem;
+    padding-left: 1rem;
+    position: relative;
+}
+
+.featureItem::before {
+    content: "—";
+    position: absolute;
+    left: 0;
+    color: #888;
+}
+
+.featureName {
+    font-weight: 500;
+    color: #111;
+}
+
+.timeline {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: #888;
+    letter-spacing: 0.05em;
+    margin-bottom: 1.5rem;
+}
+
+.techStack {
+    font-size: 0.72rem;
+    color: #666;
+    line-height: 1.6;
+    font-style: italic;
+    margin-bottom: 1.5rem;
+}
+
+.tagline {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: #333;
+    font-style: italic;
+    margin-top: 1rem;
+}
+
+/* Demo Slideshow Styles */
+.slideshow {
+    margin-top: 2rem;
+    position: relative;
+    width: 100%;
+}
+
+.slideshowTitle {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: #666;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 1rem;
+}
+
+.slideContainer {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: rgba(0, 0, 0, 0.03);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.slideVideo {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.slideCaption {
+    font-size: 0.72rem;
+    color: #666;
+    font-style: italic;
+    text-align: center;
+    margin-top: 0.75rem;
+    line-height: 1.5;
+}
+
+.slideDots {
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.slideDot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #ccc;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.slideDot:hover {
+    background: #888;
+}
+
+.slideDotActive {
+    background: #333;
+    transform: scale(1.2);
+}
+
+.slideNav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(255, 255, 255, 0.8);
+    border: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    color: #333;
+    transition: background 0.2s ease, opacity 0.2s ease;
+    opacity: 0.6;
+    z-index: 2;
+}
+
+.slideNav:hover {
+    background: rgba(255, 255, 255, 1);
+    opacity: 1;
+}
+
+.slideNavPrev {
+    left: 8px;
+}
+
+.slideNavNext {
+    right: 8px;
+}

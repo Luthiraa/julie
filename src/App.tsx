@@ -18,11 +18,13 @@ import {
   LayoutGrid,
   Terminal,
   Check,
-  Ban
+  Ban,
+  Crown
 } from 'lucide-react'
 import './index.css'
 import './App.css'
 import { AudioRecorder } from './components/AudioRecorder'
+import { Paywall } from './components/Paywall'
 
 const scenarioOptions = ["Default"]
 const quickActions = [
@@ -70,12 +72,13 @@ function App() {
   const [isScreenshotMode, setIsScreenshotMode] = useState(false)
   const [isPrivacyMode, setIsPrivacyMode] = useState(false)
   const [isSmartMode, setIsSmartMode] = useState(false)
+  const [isPremium, setIsPremium] = useState(false)
+  const [showPaywall, setShowPaywall] = useState(false)
+  const [accountProfile, setAccountProfile] = useState<{ email?: string | null; isPremium?: boolean; customPrompt?: string | null } | null>(null)
+  const [customPrompt, setCustomPrompt] = useState('')
 
   // Agentic Mode State
   const [isAgenticMode, setIsAgenticMode] = useState(false)
-  const [workflowApproved, setWorkflowApproved] = useState(false) // Track if user approved first action in workflow
-  const [actionCount, setActionCount] = useState(0) // Track consecutive actions to prevent runaway loops
-  const MAX_ACTIONS = 10 // Max actions before forcing stop
   const [pendingCommand, setPendingCommand] = useState<PendingCommand>(null)
 
   // Keyboard Tool State
@@ -84,12 +87,69 @@ function App() {
 
   // Settings State
   const [showSettings, setShowSettings] = useState(false)
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('julie_api_key') || '')
   const [scenarios, setScenarios] = useState<string[]>(() => {
     const saved = localStorage.getItem('julie_scenarios')
     return saved ? JSON.parse(saved) : scenarioOptions
   })
   const [newScenario, setNewScenario] = useState('')
+
+  // Sync Premium Status + cached account
+  useEffect(() => {
+    const bootstrap = async () => {
+      try {
+        const state = await window.ipcRenderer.invoke('get-account-state');
+        if (state?.profile) {
+          setAccountProfile(state.profile);
+          if (state.profile.customPrompt) {
+            setCustomPrompt(state.profile.customPrompt);
+          } else {
+            setCustomPrompt('');
+          }
+          if (state.profile.isPremium !== undefined) {
+            setIsPremium(Boolean(state.profile.isPremium));
+          }
+        } else if (state?.isPremium !== undefined) {
+          setIsPremium(Boolean(state.isPremium));
+          setCustomPrompt('');
+          setAccountProfile(null);
+        }
+        if (state?.apiKey) {
+          await window.ipcRenderer.invoke('set-api-key', state.apiKey);
+        }
+      } catch (e) {
+        console.error('Failed to bootstrap account state', e);
+      }
+    };
+    bootstrap();
+  }, [])
+
+  useEffect(() => {
+    const handleProfileUpdate = (_: any, profile: any) => {
+      if (profile && profile.isPremium !== undefined) {
+        setIsPremium(Boolean(profile.isPremium));
+      }
+      setAccountProfile(profile || null);
+      if (profile?.customPrompt) {
+        setCustomPrompt(profile.customPrompt);
+      } else {
+        setCustomPrompt('');
+      }
+    };
+    window.ipcRenderer.on('account-profile-updated', handleProfileUpdate);
+    return () => {
+      window.ipcRenderer.removeListener('account-profile-updated', handleProfileUpdate);
+    };
+  }, []);
+
+  const handleUpgrade = async () => {
+    // Trigger upgrade
+    await window.ipcRenderer.invoke('upgrade-premium');
+    setIsPremium(true);
+    setShowPaywall(false);
+    alert("Welcome to Premium! x.ai unlocked.");
+  };
+
+  // Dynamic Loading Text
 
   // Dynamic Loading Text
   const [loadingText, setLoadingText] = useState('Thinking...')
@@ -114,18 +174,59 @@ function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
   }, [messages])
 
-  // Save API Key Handler
-  const handleSaveApiKey = async () => {
-    if (!apiKey.trim()) return
-    try {
-      localStorage.setItem('julie_api_key', apiKey.trim())
-      await window.ipcRenderer.invoke('set-api-key', apiKey.trim())
-      alert('API Key Saved!')
-    } catch (e) {
-      console.error(e)
-      alert('Failed to save API Key')
+  // Agent IPC Listeners
+  useEffect(() => {
+    const handleMessage = (_: any, content: string) => {
+      setMessages(prev => [...prev, { role: 'assistant', content }])
+      setIsLoading(false)
     }
-  }
+    const handleThinking = () => {
+      setIsLoading(true)
+    }
+    const handleApproval = (_: any, { toolName, toolArgs }: any) => {
+      setPendingCommand({
+        id: "pending_" + Date.now(),
+        toolName,
+        toolArgs,
+        originalArgs: [],
+        command: toolName === 'execute_terminal_command' ? toolArgs.command : undefined
+      })
+      setIsLoading(false)
+    }
+    const handleStatus = (_: any, status: string) => {
+      setLoadingText(status)
+    }
+    const handleError = (_: any, error: string) => {
+      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${error}` }])
+      setIsLoading(false)
+    }
+    const handleStopped = () => {
+      setIsLoading(false)
+      setPendingCommand(null)
+    }
+    const handleLinkTimeout = () => {
+      alert('Link request timed out. Reopen Julie settings in the desktop app to get a new code.')
+    }
+
+    const ipc = window.ipcRenderer;
+    ipc.on('agent-message', handleMessage)
+    ipc.on('agent-thinking', handleThinking)
+    ipc.on('agent-request-approval', handleApproval)
+    ipc.on('agent-status', handleStatus)
+    ipc.on('agent-error', handleError)
+    ipc.on('agent-stopped', handleStopped)
+    ipc.on('account-link-timeout', handleLinkTimeout)
+
+    return () => {
+      ipc.removeListener('agent-message', handleMessage)
+      ipc.removeListener('agent-thinking', handleThinking)
+      ipc.removeListener('agent-request-approval', handleApproval)
+      ipc.removeListener('agent-status', handleStatus)
+      ipc.removeListener('agent-error', handleError)
+      ipc.removeListener('agent-stopped', handleStopped)
+      ipc.removeListener('account-link-timeout', handleLinkTimeout)
+    }
+  }, [])
 
   // Add Scenario Handler
   const handleAddScenario = () => {
@@ -137,15 +238,38 @@ function App() {
     setNewScenario('')
   }
 
-  const toggleSettings = () => setShowSettings(!showSettings)
+  const startLinkFlow = async () => {
+    try {
+      await window.ipcRenderer.invoke('open-settings')
+      alert('Opening browser to connect Julie. Complete sign-in there and the desktop app will sync automatically.')
+    } catch (error) {
+      console.error('settings failed', error)
+      alert('Failed to open browser. Please try again.')
+    }
+  }
+
+  const openAccountSettings = async () => {
+    try {
+      const state = await window.ipcRenderer.invoke('get-account-state')
+      if (state?.profile?.id) {
+        setAccountProfile(state.profile)
+        if (state.profile.customPrompt) {
+          setCustomPrompt(state.profile.customPrompt)
+        }
+        if (state.profile.isPremium !== undefined) {
+          setIsPremium(Boolean(state.profile.isPremium))
+        }
+        setShowSettings(true)
+        return
+      }
+      await startLinkFlow()
+    } catch (error) {
+      console.error('settings failed', error)
+    }
+  }
 
   useEffect(() => {
     const init = async () => {
-      const storedKey = localStorage.getItem('julie_api_key')
-      if (storedKey) {
-        window.ipcRenderer.invoke('set-api-key', storedKey)
-      }
-
       try {
         await window.ipcRenderer.invoke('resize-window', { width: 800, height: 600 })
       } catch (error) {
@@ -167,7 +291,19 @@ function App() {
   }
 
   const toggleSmartMode = () => {
+    if (!isPremium) {
+      setShowPaywall(true);
+      return;
+    }
     setIsSmartMode(!isSmartMode)
+  }
+
+  const toggleAgenticMode = () => {
+    if (!isPremium) {
+      setShowPaywall(true);
+      return;
+    }
+    setIsAgenticMode(!isAgenticMode);
   }
 
   const togglePrivacyMode = async () => {
@@ -207,8 +343,6 @@ function App() {
     setMessages(newMessages)
 
     setInput('')
-    setWorkflowApproved(false) // Reset workflow for new user request
-    setActionCount(0) // Reset action counter for new workflow
     setIsLoading(true)
 
     try {
@@ -225,12 +359,18 @@ function App() {
           : `${finalUserContent}${contextText}`
       }
 
+
       const apiMessages = [
         ...messages.map(m => ({ role: m.role, content: m.content })),
         { role: 'user', content: finalUserContent }
       ]
 
-      await callAgent(apiMessages)
+      await window.ipcRenderer.invoke('ask-groq', {
+        messages: apiMessages,
+        isSmart: isSmartMode,
+        isAgentic: isAgenticMode
+      })
+
       setTranscriptHistory('')
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Something went wrong'
@@ -239,151 +379,20 @@ function App() {
     }
   }
 
-  // Recursive Agent Caller
-  const callAgent = async (apiMessages: any[]) => {
-    setIsLoading(true)
-    try {
-      const response = await window.ipcRenderer.invoke('ask-groq', {
-        messages: apiMessages,
-        isSmart: isSmartMode,
-        isAgentic: isAgenticMode
-      })
 
-      if (typeof response === 'string') {
-        // Fallback or simple error
-        setMessages(prev => [...prev, { role: 'assistant', content: response }])
-      } else if (response.type === 'content') {
-        // Standard Text Response
-        setMessages(prev => [...prev, { role: 'assistant', content: response.content }])
-      } else if (response.type === 'tool_call') {
-        // Handle Tool Call
-        const { function: fn } = response
-        const supportedTools = ['execute_terminal_command', 'browser_action', 'keyboard_action', 'computer_action']
-
-        if (supportedTools.includes(fn.name)) {
-          // Robust JSON parsing to handle LLM quirks
-          let argsStr = fn.arguments;
-          try {
-            // Remove markdown code blocks if present
-            argsStr = argsStr.replace(/```json/g, '').replace(/```/g, '');
-            // Remove surrounding parentheses if present (e.g. ({...}))
-            if (argsStr.trim().startsWith('(') && argsStr.trim().endsWith(')')) {
-              argsStr = argsStr.trim().slice(1, -1);
-            }
-            const args = JSON.parse(argsStr);
-            const pendingData = {
-              id: response.id,
-              command: fn.name === 'execute_terminal_command' ? args.command : undefined,
-              toolName: fn.name,
-              toolArgs: args,
-              originalArgs: apiMessages
-            }
-
-            // If workflow already approved, auto-execute without asking
-            if (workflowApproved) {
-              await executeToolAction(pendingData)
-            } else {
-              // First action in workflow - ask for approval
-              setPendingCommand(pendingData)
-            }
-          } catch (e: any) {
-            console.error("JSON Parse Error:", e);
-            setMessages(prev => [...prev, { role: 'assistant', content: `Error parsing tool arguments: ${e.message}` }])
-          }
-        } else {
-          setMessages(prev => [...prev, { role: 'assistant', content: `Error: Unknown tool ${fn.name}` }])
-        }
-      }
-    } catch (err: any) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.message}` }])
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  // Shared execution logic for tool actions
-  const executeToolAction = async (pending: NonNullable<PendingCommand>) => {
-    // Check action limit to prevent runaway loops
-    if (actionCount >= MAX_ACTIONS) {
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: `⚠️ Reached maximum of ${MAX_ACTIONS} consecutive actions. Stopping to prevent runaway loop. Please refine your request or continue manually.`
-      }])
-      setWorkflowApproved(false)
-      setActionCount(0)
-      setIsLoading(false)
-      return
-    }
-
-    setActionCount(prev => prev + 1)
-    setIsLoading(true)
-    const { command, toolName, toolArgs, originalArgs } = pending
-
-    const intermediateMessages = [
-      ...originalArgs,
-      { role: 'assistant', content: `I will run: \`${command || toolName}\`` }
-    ]
-
-    const finalArgs = { ...toolArgs }
-    if (toolName === 'keyboard_action' && selectedTargetApp) {
-      finalArgs.targetApp = selectedTargetApp
-    }
-
-    const displayCmd = toolName === 'execute_terminal_command' ? command : JSON.stringify(finalArgs)
-    setMessages(prev => [...prev, { role: 'assistant', content: `Running: \`${displayCmd}\`...` }])
-
-    try {
-      let output = ""
-      if (toolName === 'execute_terminal_command' && command) {
-        output = await window.ipcRenderer.invoke('run-command', command)
-      } else if (toolName === 'browser_action') {
-        output = await window.ipcRenderer.invoke('trigger-browser-action', finalArgs)
-      } else if (toolName === 'keyboard_action') {
-        output = await window.ipcRenderer.invoke('trigger-keyboard-action', finalArgs)
-      } else if (toolName === 'computer_action') {
-        output = await window.ipcRenderer.invoke('trigger-computer-action', finalArgs)
-      }
-
-      const nextMessages = [
-        ...intermediateMessages,
-        { role: 'user', content: `[SYSTEM: The action completed. Output below. Continue with next step if needed, or summarize if done.]\n\n${output}` }
-      ]
-
-      setMessages(prev => [...prev, { role: 'assistant', content: `Output:\n\`\`\`\n${output}\n\`\`\`` }])
-
-      // Continue the agent loop - let backend decide when to stop
-      await callAgent(nextMessages)
-
-    } catch (err: any) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `Execution Error: ${err.message}` }])
-      setWorkflowApproved(false)
-      setIsLoading(false)
-    }
-  }
-
+  // Approval Handlers (Backend Driven)
   const handleApproveCommand = async () => {
     if (!pendingCommand) return
-    setWorkflowApproved(true) // User approved - auto-execute subsequent actions
+    await window.ipcRenderer.invoke('agent-approve', { id: pendingCommand.id })
     setPendingCommand(null)
     setSelectedTargetApp(null)
     setAvailableApps([])
-    await executeToolAction(pendingCommand)
   }
 
   const handleDenyCommand = async () => {
     if (!pendingCommand) return
-    const { command, originalArgs } = pendingCommand
+    await window.ipcRenderer.invoke('agent-deny', { id: pendingCommand.id })
     setPendingCommand(null)
-    setWorkflowApproved(false) // Reset workflow on deny
-
-    const nextMessages = [
-      ...originalArgs,
-      { role: 'assistant', content: `I wanted to run: \`${command}\`` },
-      { role: 'user', content: "I denied that command. Do not run it. Ask me for something else or stop." }
-    ]
-
-    setMessages(prev => [...prev, { role: 'assistant', content: `(Command \`${command}\` denied by user)` }])
-    await callAgent(nextMessages)
   }
 
 
@@ -412,22 +421,45 @@ function App() {
     <div className="settings-overlay">
       <div className="settings-modal">
         <div className="settings-header">
-          <h3>Settings</h3>
+          <h3>Custom Julies</h3>
           <button className="icon-btn-plain" onClick={() => setShowSettings(false)}><X size={20} /></button>
         </div>
 
         <div className="settings-section">
-          <label>Groq API Key</label>
-          <div className="input-group">
-            <input
-              type="password"
-              placeholder="gsk_..."
-              value={apiKey}
-              onChange={e => setApiKey(e.target.value)}
-            />
-            <button className="pill-btn blue" onClick={handleSaveApiKey}>Save</button>
-          </div>
-          <p className="hint">Enter your key to override the default.</p>
+          <label>Account</label>
+          {accountProfile ? (
+            <>
+              <div className="account-summary">
+                <span className="account-email">{accountProfile.email || 'Linked account'}</span>
+                <span className={`account-status ${isPremium ? 'premium' : 'standard'}`}>
+                  {isPremium ? 'Premium' : 'Free'}
+                </span>
+              </div>
+              {isPremium ? (
+                <>
+                  <p className="helper-text">Custom Julie prompt (managed via tryjulie.vercel.app)</p>
+                  <textarea
+                    readOnly
+                    value={customPrompt || 'No custom prompt yet. Use the desktop link flow to add one.'}
+                  />
+                </>
+              ) : (
+                <p className="helper-text">
+                  Using locally cached Groq key. Manage or rotate the key through the desktop link flow.
+                </p>
+              )}
+              <button className="pill-btn ghost" onClick={startLinkFlow}>Manage on Web</button>
+            </>
+          ) : (
+            <>
+              <p className="helper-text">
+                Link Julie to your account to unlock Premium or sync your Groq key automatically.
+              </p>
+              <button className="pill-btn purple" onClick={startLinkFlow}>
+                Link Account
+              </button>
+            </>
+          )}
         </div>
 
         <div className="settings-section">
@@ -449,6 +481,14 @@ function App() {
             ))}
           </ul>
         </div>
+
+        {!isPremium && (
+          <div className="settings-section">
+            <button className="pill-btn purple" style={{ width: '100%', justifyContent: 'center' }} onClick={() => { setShowSettings(false); setShowPaywall(true); }}>
+              <Crown size={14} style={{ marginRight: 6 }} /> Upgrade to Premium
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -542,7 +582,7 @@ function App() {
         <div className="dock-divider" />
         <button className="dock-btn"><ChevronDown size={18} /></button>
         <div className="dock-divider" />
-        <button className="dock-btn" onClick={toggleSettings}><LayoutGrid size={18} /></button>
+        <button className="dock-btn" onClick={openAccountSettings}><LayoutGrid size={18} /></button>
       </div>
       <button className="dock-close no-drag" onClick={handleCloseClick}>
         <X size={18} />
@@ -552,6 +592,7 @@ function App() {
 
   return (
     <div className="liquid-shell">
+      {showPaywall && <Paywall onClose={() => setShowPaywall(false)} onUpgrade={handleUpgrade} />}
       {showSettings && settingsOverlay}
       {floatingControlBar}
 
@@ -626,7 +667,7 @@ function App() {
               </button>
               <button
                 className={`pill-btn ${isAgenticMode ? 'purple' : 'ghost'}`}
-                onClick={() => setIsAgenticMode(!isAgenticMode)}
+                onClick={toggleAgenticMode}
                 title="Allow Julie to run terminal commands"
               >
                 <Terminal size={14} />
@@ -641,6 +682,9 @@ function App() {
                   {scenarios.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                 </select>
               </div>
+              <button className="pill-btn ghost" onClick={() => setShowSettings(true)}>
+                Manage
+              </button>
             </div>
             <button className="send-circle-btn" onClick={() => handleSubmit()}>
               <ArrowUp size={18} />
